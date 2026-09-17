@@ -24,7 +24,20 @@ root.geometry("1200x720")
 root.columnconfigure(0, weight=1)
 root.columnconfigure(1, weight=1)
 root.columnconfigure(2, weight=1)
-root.rowconfigure(0, weight=1)
+root.rowconfigure(0, weight=0)
+root.rowconfigure(1, weight=1)
+root.rowconfigure(2, weight=0)
+
+# ---------------- ENCABEZADO ----------------
+frame_header = tk.Frame(
+    root,
+    bg=BG_COLOR,
+    highlightbackground=FRAME_BORDER_COLOR,
+    highlightthickness=1,
+    height=60
+)
+frame_header.grid(row=0, column=0, columnspan=3, sticky="ew", padx=15, pady=15)
+frame_header.grid_propagate(False)  # conserva el alto fijo aunque no tenga contenido
 
 # ---------------- PANEL IZQUIERDO ----------------
 frame_izq = tk.Frame(
@@ -33,7 +46,7 @@ frame_izq = tk.Frame(
     highlightbackground=FRAME_BORDER_COLOR,
     highlightthickness=1
 )
-frame_izq.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+frame_izq.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
 
 puertos.crear_panel(frame_izq)
 
@@ -44,7 +57,7 @@ frame_centro = tk.Frame(
     highlightbackground=FRAME_BORDER_COLOR,
     highlightthickness=1
 )
-frame_centro.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+frame_centro.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
 
 cargarSketch.crear_panel(frame_centro)
 
@@ -55,9 +68,20 @@ frame_der = tk.Frame(
     highlightbackground=FRAME_BORDER_COLOR,
     highlightthickness=1
 )
-frame_der.grid(row=0, column=2, sticky="nsew", padx=5, pady=5)
+frame_der.grid(row=1, column=2, sticky="nsew", padx=5, pady=5)
 
 rastrear.crear_panel(frame_der)
+
+# ---------------- PIE DE PÁGINA ----------------
+frame_footer = tk.Frame(
+    root,
+    bg=BG_COLOR,
+    highlightbackground=FRAME_BORDER_COLOR,
+    highlightthickness=1,
+    height=45
+)
+frame_footer.grid(row=2, column=0, columnspan=3, sticky="ew", padx=15, pady=15)
+frame_footer.grid_propagate(False)  # conserva el alto fijo aunque no tenga contenido
 
 # ---------------- AJUSTE DINÁMICO ----------------
 def ajustar_ventana(event):

@@ -21,12 +21,15 @@ class BarCarga:
 
         self.frame = tk.Frame(parent, bg=bg)
 
-        estilo = ttk.Style()
-        nombre_estilo = f"BarCarga{_estilo_contador}.Horizontal.TProgressbar"
-        estilo.configure(nombre_estilo, background="green", troughcolor="black", bordercolor="black")
+        self._estilo = ttk.Style()
+        # El tema por defecto en Windows (vista) ignora los colores personalizados del Progressbar
+        if self._estilo.theme_use() != "clam":
+            self._estilo.theme_use("clam")
+        self._nombre_estilo = f"BarCarga{_estilo_contador}.Horizontal.TProgressbar"
+        self._estilo.configure(self._nombre_estilo, background="black", troughcolor="black", bordercolor="black", lightcolor="black", darkcolor="black")
 
         self._barra = ttk.Progressbar(
-            self.frame, orient="horizontal", mode="indeterminate", style=nombre_estilo
+            self.frame, orient="horizontal", mode="indeterminate", style=self._nombre_estilo
         )
         self._barra.pack(side="left", fill="x", expand=True, padx=(0, 6))
 
@@ -42,12 +45,14 @@ class BarCarga:
         if self._activo:
             return
         self._activo = True
+        self._estilo.configure(self._nombre_estilo, background="green", lightcolor="green", darkcolor="green")
         self._barra.start(12)
         self._parpadear()
 
     def detener(self):
         self._activo = False
         self._barra.stop()
+        self._estilo.configure(self._nombre_estilo, background="black", lightcolor="black", darkcolor="black")
         if self._after_id is not None:
             self._circulo.after_cancel(self._after_id)
             self._after_id = None
