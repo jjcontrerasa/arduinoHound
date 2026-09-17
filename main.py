@@ -28,6 +28,26 @@ root.title(TITLE)
 root.configure(bg=BG_COLOR)
 root.state("zoomed")
 
+if ICON_PATH.exists():
+    try:
+        root.iconbitmap(str(ICON_PATH))
+    except Exception:
+        pass
+
+
+def _activar_modo_oscuro():
+    """Fuerza la barra de titulo oscura en Windows 10/11 (no falla si no aplica)."""
+    try:
+        import ctypes
+        hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
+        valor = ctypes.c_int(1)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(valor), ctypes.sizeof(valor))
+    except Exception:
+        pass
+
+
+root.after(10, _activar_modo_oscuro)
+
 # Tamaño inicial
 root.geometry("1200x720")
 
@@ -49,7 +69,7 @@ header_izq.pack(side="left", fill="y", padx=10)
 
 if ImageTk and ICON_PATH.exists():
     try:
-        logo_img = ImageTk.PhotoImage(Image.open(ICON_PATH).resize((48, 48)))
+        logo_img = ImageTk.PhotoImage(Image.open(ICON_PATH).resize((90, 90)))
         logo_label = tk.Label(header_izq, image=logo_img, bg=BG_COLOR)
         logo_label.image = logo_img  # evita que el garbage collector lo elimine
         logo_label.pack(side="left", padx=(0, 10))
