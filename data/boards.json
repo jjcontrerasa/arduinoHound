@@ -1,0 +1,30 @@
+{
+  "uno": {
+    "fqbn": "arduino:avr:uno",
+    "mcu": "ATmega328P"
+  },
+  "nano": {
+    "fqbn": "arduino:avr:nano",
+    "mcu": "ATmega328P"
+  },
+  "nano_oldboot": {
+    "fqbn": "arduino:avr:nano:cpu=atmega328old",
+    "mcu": "ATmega328P (Old Bootloader)"
+  },
+  "nano_every": {
+    "fqbn": "arduino:megaavr:nona4809",
+    "mcu": "ATmega4809"
+  },
+  "mega2560": {
+    "fqbn": "arduino:avr:mega",
+    "mcu": "ATmega2560"
+  },
+  "uno_r4_minima": {
+    "fqbn": "arduino:renesas_uno:unor4minima",
+    "mcu": "RA4M1"
+  },
+  "uno_r4_wifi": {
+    "fqbn": "arduino:renesas_uno:unor4wifi",
+    "mcu": "RA4M1 + ESP32-S3"
+  }
+}

@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+
+# Toolchain de Arduino (binarios pesados, se descargan con arduino-cli)
+packages/
+staging/
+tmp/
+core/
+
+# Carpeta temporal sin usar
+Nueva carpeta/
