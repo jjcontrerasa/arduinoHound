@@ -1,16 +1,72 @@
 import subprocess
 import tkinter as tk
 import threading
+import re
 from tkinter import ttk
 from .deteccion_puertos import obtener_dispositivos, parsear_dispositivos
 from .estado_ui import BarCarga
-from .persistencia import BOARDS_FILE, PLACAS_FILE, cargar_boards, cargar_placas, guardar_placa, obtener_puerto_default, guardar_puerto_default
+from .persistencia import PLACAS_FILE, cargar_boards, cargar_placas, guardar_placa, obtener_puerto_default, guardar_puerto_default
+from .rutas import resource_path
 
 COLOR_TITULO = "OliveDrab2"
 COLOR_OK = "green"
 
 PLACAS_JSON = PLACAS_FILE
-BOARDS_JSON = BOARDS_FILE
+
+
+def _perfil_firma_avr(mcu):
+    """Devuelve los protocolos de bootloader que pueden leer la firma del MCU."""
+    mcu = (mcu or "").upper()
+    if "ATMEGA328" in mcu:
+        return (("arduino", "atmega328p", "115200"), ("arduino", "atmega328p", "57600"))
+    if "ATMEGA2560" in mcu:
+        return (("arduino", "atmega2560", "115200"),)
+    if "ATMEGA32U4" in mcu:
+        return (("avr109", "atmega32u4", "57600"),)
+    if "ATMEGA168" in mcu:
+        return (("arduino", "atmega168", "57600"), ("arduino", "atmega168", "19200"))
+    if "ATMEGA8" in mcu:
+        return (("arduino", "atmega8", "19200"),)
+    return ()
+
+
+def leer_firma_avr(puerto, mcu):
+    """Lee la firma por el bootloader sin escribir en la memoria del microcontrolador."""
+    perfiles = _perfil_firma_avr(mcu)
+    if not perfiles:
+        return "No disponible (se requiere un bootloader AVR compatible)"
+
+    herramienta = resource_path("packages", "arduino", "tools", "avrdude", "8.0.0-arduino1", "bin", "avrdude.exe")
+    configuracion = herramienta.parent.parent / "etc" / "avrdude.conf"
+    if not herramienta.exists() or not configuracion.exists():
+        return "No disponible (avrdude no encontrado)"
+
+    for programador, microcontrolador, velocidad in perfiles:
+        comando = [
+            str(herramienta), "-C", str(configuracion), "-v", "-n",
+            "-c", programador, "-p", microcontrolador,
+            "-P", puerto, "-b", velocidad,
+        ]
+        try:
+            resultado = subprocess.run(
+                comando,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+
+        coincidencia = re.search(
+            r"device signature\s*=\s*(0x[0-9a-f]+)",
+            f"{resultado.stdout}\n{resultado.stderr}",
+            flags=re.IGNORECASE,
+        )
+        if coincidencia:
+            return coincidencia.group(1).upper()
+
+    return "No disponible (no respondió el bootloader AVR)"
 
 
 def liberar_puertos():
@@ -56,8 +112,10 @@ def crear_panel(root):
 
     placas_guardadas = {}
     dispositivos_actuales = []
+    consulta_firma_id = 0
+    operaciones_activas = 0
 
-    boards = cargar_json(BOARDS_JSON)
+    boards = cargar_boards()
 
     def detectar_fqbn_por_dispositivo(dispositivo):
         nombre = (dispositivo.get("nombre", "") or "").lower()
@@ -82,6 +140,17 @@ def crear_panel(root):
 
     barCarga = BarCarga(main, bg="black")
     barCarga.pack(side="bottom", fill="x", padx=5, pady=5)
+
+    def iniciar_operacion():
+        nonlocal operaciones_activas
+        operaciones_activas += 1
+        barCarga.iniciar()
+
+    def terminar_operacion():
+        nonlocal operaciones_activas
+        operaciones_activas = max(0, operaciones_activas - 1)
+        if not operaciones_activas:
+            barCarga.detener()
 
     tk.Label(main, text="Escanear Puertos",
              fg=COLOR_TITULO, bg="black",
@@ -153,6 +222,8 @@ def crear_panel(root):
 
     def mostrar(d):
 
+        nonlocal consulta_firma_id
+
         recargar_placas()
 
         opciones = sorted({v["fqbn"] for v in boards.values()})
@@ -180,6 +251,14 @@ def crear_panel(root):
         detalles.insert(tk.END, f"PID: {d['pid']}\n")
         detalles.insert(tk.END, f"Numero de serie USB real: {d['serial']}\n\n")
 
+        mcu = next(
+            (placa.get("mcu", "") for placa in boards.values() if placa["fqbn"] == (fqbn_asociado or fqbn_detectado)),
+            "",
+        )
+        consulta_firma_id += 1
+        id_consulta = consulta_firma_id
+        detalles.insert(tk.END, "Firma: consultando...\n")
+
         if fqbn_detectado:
             detalles.insert(tk.END, f"FQBN asignado: {fqbn_detectado}\n", "ok")
             detalles.insert(tk.END, f"Placa detectada: {next((k for k, v in boards.items() if v['fqbn'] == fqbn_detectado), d['nombre'])}\n", "ok")
@@ -197,6 +276,27 @@ def crear_panel(root):
 
         detalles.insert(tk.END, "\n=== DETALLE SISTEMA ===\n")
         detalles.insert(tk.END, d["raw"])
+
+        def consultar_firma():
+            try:
+                firma = leer_firma_avr(d["puerto"], mcu)
+
+                def actualizar_firma():
+                    try:
+                        if id_consulta != consulta_firma_id or seleccion.get() != d["puerto"]:
+                            return
+                        contenido = detalles.get("1.0", tk.END)
+                        detalles.delete("1.0", tk.END)
+                        detalles.insert(tk.END, contenido.replace("Firma: consultando...", f"Firma: {firma}", 1))
+                    finally:
+                        terminar_operacion()
+
+                root.after(0, actualizar_firma)
+            except Exception:
+                root.after(0, terminar_operacion)
+
+        iniciar_operacion()
+        threading.Thread(target=consultar_firma, daemon=True).start()
 
     def guardar_actual():
 
@@ -218,7 +318,7 @@ def crear_panel(root):
     btn_guardar.config(command=guardar_actual)
     fqbn_combo.bind("<<ComboboxSelected>>", lambda event: guardar_actual())
 
-    def ejecutar():
+    def ejecutar(dispositivos):
 
         nonlocal dispositivos_actuales
 
@@ -227,8 +327,7 @@ def crear_panel(root):
 
         recargar_placas()
 
-        salida = obtener_dispositivos()
-        dispositivos_actuales = parsear(salida)
+        dispositivos_actuales = dispositivos
 
         for d in dispositivos_actuales:
 
@@ -254,14 +353,22 @@ def crear_panel(root):
             mostrar(primer)
 
     def escanear():
-        liberar_puertos()
-        barCarga.iniciar()
+        iniciar_operacion()
 
         def tarea():
             try:
-                ejecutar()
-            finally:
-                root.after(0, barCarga.detener)
+                liberar_puertos()
+                dispositivos = parsear(obtener_dispositivos())
+            except Exception:
+                dispositivos = []
+
+            def actualizar_panel():
+                try:
+                    ejecutar(dispositivos)
+                finally:
+                    terminar_operacion()
+
+            root.after(0, actualizar_panel)
 
         threading.Thread(target=tarea, daemon=True).start()
 

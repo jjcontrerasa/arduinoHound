@@ -7,5 +7,8 @@
     "Arduino Nano": "arduino:megaavr:nona4809",
     "Serial USB": "arduino:avr:uno",
     "puerto_COM5": "arduino:avr:uno",
-    "puerto_COM5_placa": "uno"
+    "puerto_COM5_placa": "uno",
+    "puerto_COM1": "arduino:avr:nano:cpu=atmega328old",
+    "puerto_COM1_placa": "nano_oldboot",
+    "Serial": "arduino:avr:nano:cpu=atmega328old"
 }

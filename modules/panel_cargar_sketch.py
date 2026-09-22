@@ -20,7 +20,6 @@ COLOR_TITULO = "OliveDrab2"
 
 arduino_boards = cargar_boards()
 arduino = ArduinoCLI()
-buscar_var = None
 fqbn_var = None
 port_var = None
 placa_var = None
@@ -73,7 +72,7 @@ def mostrar_detalles(val, key):
     detalles_output.delete("1.0", tk.END)
     detalles_output.insert(
         tk.END,
-        f"Placa: {key}\nFQBN: {val['fqbn']}\nMCU: {val.get('mcu', '-')}\n",
+        f"Placa: {val.get('name', key)}\nFQBN: {val['fqbn']}\nMCU: {val.get('mcu', '-')}\n",
     )
 
 
@@ -95,20 +94,6 @@ def seleccionar_placa(val, key):
     mostrar_detalles(val, key)
 
 
-def filtrar_listado(event=None):
-    texto = buscar_var.get().lower().strip()
-    opciones = [
-        key for key, value in arduino_boards.items()
-        if not texto or texto in key.lower() or texto in value["fqbn"].lower()
-    ]
-    if not opciones:
-        opciones = sorted(arduino_boards)
-    board_combo["values"] = opciones
-    if placa_var.get() not in opciones:
-        placa_var.set("")
-        fqbn_var.set("")
-
-
 def on_placa_seleccionada(event=None):
     key = placa_var.get()
     value = arduino_boards.get(key)
@@ -124,7 +109,6 @@ def seleccionar_puerto(linea, puerto):
     port_var.set(puerto)
     fqbn_var.set("")
     placa_var.set("")
-    buscar_var.set("")
     detalles_output.delete("1.0", tk.END)
     line_lower = linea.lower()
     match_key = None
@@ -134,20 +118,16 @@ def seleccionar_puerto(linea, puerto):
             break
 
     if match_key:
-        buscar_var.set(match_key)
         fqbn_var.set(arduino_boards[match_key]["fqbn"])
         placa_var.set(match_key)
         guardar_asociacion_puerto()
-        filtrar_listado()
         mostrar_detalles(arduino_boards[match_key], match_key)
         return
 
     board_combo["values"] = sorted(arduino_boards)
     placa_var.set("")
     fqbn_var.set("")
-    buscar_var.set("")
     detalles_output.insert(tk.END, "No se detectó un FQBN exacto para este puerto.\nSelecciona manualmente la placa Arduino disponible.\n")
-    filtrar_listado()
 
 
 def escanear_puertos():
@@ -364,9 +344,8 @@ def cargar_respaldo():
 
 
 def crear_panel(root):
-    global buscar_var, fqbn_var, port_var, placa_var, frame_radios, board_combo
+    global fqbn_var, port_var, placa_var, frame_radios, board_combo
     global detalles_output, text_output, barCarga
-    buscar_var = tk.StringVar()
     fqbn_var = tk.StringVar()
     port_var = tk.StringVar()
     placa_var = tk.StringVar()
@@ -388,17 +367,12 @@ def crear_panel(root):
 
     frame_radios = tk.Frame(main, bg="black", highlightbackground="white", highlightthickness=1)
     frame_radios.pack(fill="x", pady=5)
-    search_frame = tk.Frame(main, bg="black")
-    search_frame.pack(fill="x")
-    tk.Label(search_frame, text="FQBN:", fg="white", bg="black").pack(side="left")
-    entry = tk.Entry(search_frame, textvariable=buscar_var)
-    entry.pack(side="left")
-    entry.bind("<KeyRelease>", filtrar_listado)
 
     list_frame = tk.Frame(main, bg="black")
     list_frame.pack(fill="x", pady=5)
     board_combo = ttk.Combobox(list_frame, textvariable=placa_var, state="readonly", width=30)
     board_combo.pack(fill="x")
+    board_combo["values"] = sorted(arduino_boards)
     board_combo.bind("<<ComboboxSelected>>", on_placa_seleccionada)
 
     detalles_output = tk.Text(main, height=DETAILS_HEIGHT, bg="black", fg=COLOR_TITULO)
@@ -412,4 +386,3 @@ def crear_panel(root):
 
     root.after(500, inicializar_arduino)
     root.after(600, lambda: escanear_puertos())
-    filtrar_listado()
