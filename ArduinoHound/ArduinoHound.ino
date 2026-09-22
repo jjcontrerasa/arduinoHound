@@ -32,6 +32,8 @@
 #endif
 
 #define UART_BAUD 9600
+#define SERIAL_SCAN_MIN_PIN 2
+#define SERIAL_SCAN_MAX_PIN 13
 
 // ================= CONFIGURACIÓN DE MÓDULOS SPI =================
 // La salida SPI es adicional y conserva el protocolo serial existente.
@@ -52,6 +54,22 @@ ModuloSPI modulosSPI[] = {
 };
 
 const int NUM_MODULOS_SPI = sizeof(modulosSPI) / sizeof(ModuloSPI);
+
+// Memorias flash SPI: usan el comando fijo JEDEC ID (0x9F) en vez del
+// esquema de registro + bit de lectura que usan sensores como el ADXL345.
+struct ModuloFlashSPI {
+  const char* nombre;
+  byte csPin;
+  byte manufacturerID;
+  byte memoryType;
+  byte capacidad;
+};
+
+ModuloFlashSPI modulosFlashSPI[] = {
+  {"W25Q64", 4, 0xEF, 0x40, 0x17}
+};
+
+const int NUM_MODULOS_FLASH_SPI = sizeof(modulosFlashSPI) / sizeof(ModuloFlashSPI);
 
 byte leerRegistroSPI(int csPin, byte registro) {
   SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
@@ -78,7 +96,39 @@ bool csYaConfigurado(byte pin) {
       return true;
     }
   }
+  for (int i = 0; i < NUM_MODULOS_FLASH_SPI; i++) {
+    if (modulosFlashSPI[i].csPin == pin) {
+      return true;
+    }
+  }
   return false;
+}
+
+void leerJEDEC_ID(int csPin, byte &manufacturer, byte &tipo, byte &capacidad) {
+  SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+  digitalWrite(csPin, LOW);
+  SPI.transfer(0x9F);
+  manufacturer = SPI.transfer(0x00);
+  tipo = SPI.transfer(0x00);
+  capacidad = SPI.transfer(0x00);
+  digitalWrite(csPin, HIGH);
+  SPI.endTransaction();
+}
+
+bool probarFlashSPI(int modulo) {
+  byte csPin = modulosFlashSPI[modulo].csPin;
+  byte manufacturer, tipo, capacidad;
+  leerJEDEC_ID(csPin, manufacturer, tipo, capacidad);
+
+  if (manufacturer != modulosFlashSPI[modulo].manufacturerID ||
+      tipo != modulosFlashSPI[modulo].memoryType ||
+      capacidad != modulosFlashSPI[modulo].capacidad) {
+    return false;
+  }
+
+  Serial.print("SPI:");
+  Serial.println(modulosFlashSPI[modulo].nombre);
+  return true;
 }
 
 bool probarModuloSPI(byte csPin, int modulo) {
@@ -95,6 +145,7 @@ bool probarModuloSPI(byte csPin, int modulo) {
 
 void detectarSPI() {
   bool encontrados[NUM_MODULOS_SPI] = {false};
+  bool encontradosFlash[NUM_MODULOS_FLASH_SPI] = {false};
 
   // Primero se prueban los pines declarados explícitamente.
   for (int modulo = 0; modulo < NUM_MODULOS_SPI; modulo++) {
@@ -102,6 +153,12 @@ void detectarSPI() {
 
     if (!encontrados[modulo] && probarModuloSPI(csPin, modulo)) {
       encontrados[modulo] = true;
+    }
+  }
+
+  for (int modulo = 0; modulo < NUM_MODULOS_FLASH_SPI; modulo++) {
+    if (!encontradosFlash[modulo] && probarFlashSPI(modulo)) {
+      encontradosFlash[modulo] = true;
     }
   }
 
@@ -137,6 +194,11 @@ void detectarSPI() {
       encontrado = true;
     }
   }
+  for (int modulo = 0; modulo < NUM_MODULOS_FLASH_SPI; modulo++) {
+    if (encontradosFlash[modulo]) {
+      encontrado = true;
+    }
+  }
 
   if (!encontrado) {
     Serial.println("SPI:NONE");
@@ -164,6 +226,164 @@ String consultarLora(const char *comando) {
   return respuesta;
 }
 
+bool esPinSerialPermitido(byte pin) {
+  if (pin == 0 || pin == 1) {
+    return false;
+  }
+
+  if (pin == MOSI || pin == MISO || pin == SCK) {
+    return false;
+  }
+
+  if (pin == 18 || pin == 19 || pin == 20 || pin == 21) {
+    return false;
+  }
+
+  return true;
+}
+
+String leerRespuestaSoftware(SoftwareSerial &puerto, unsigned long timeout) {
+  unsigned long inicio = millis();
+  String respuesta = "";
+
+  while (millis() - inicio < timeout) {
+    while (puerto.available()) {
+      char c = puerto.read();
+      if (c == '\r' || c == '\n') {
+        if (respuesta.length() > 0) {
+          respuesta += ' ';
+        }
+        continue;
+      }
+      respuesta += c;
+    }
+    delay(10);
+  }
+
+  return respuesta;
+}
+
+bool esRespuestaTransceptor(const String &respuesta) {
+  String texto = respuesta;
+  texto.toUpperCase();
+
+  return respuesta.length() > 0 && (
+    texto.indexOf("OK") >= 0 ||
+    texto.indexOf("AT") >= 0 ||
+    texto.indexOf("HC-12") >= 0 ||
+    texto.indexOf("MODE") >= 0 ||
+    texto.indexOf("VERSION") >= 0 ||
+    texto.indexOf("RF") >= 0 ||
+    texto.indexOf("DATA") >= 0 ||
+    texto.indexOf("SET") >= 0 ||
+    texto.indexOf("BAUD") >= 0 ||
+    texto.indexOf("CFG") >= 0 ||
+    texto.indexOf("TX") >= 0 ||
+    texto.indexOf("RX") >= 0
+  );
+}
+
+bool probarPuertoSerial(byte rxPin, byte txPin) {
+  if (rxPin == txPin || !esPinSerialPermitido(rxPin) || !esPinSerialPermitido(txPin)) {
+    return false;
+  }
+
+  SoftwareSerial prueba(rxPin, txPin);
+  prueba.begin(UART_BAUD);
+  delay(200);
+
+  prueba.println("AT");
+  String respuesta = leerRespuestaSoftware(prueba, 500);
+  if (esRespuestaTransceptor(respuesta)) {
+    Serial.print("UART_DEV:TRANSCEIVER;RX=");
+    Serial.print(rxPin);
+    Serial.print(";TX=");
+    Serial.print(txPin);
+    Serial.print(";TYPE=");
+    Serial.print(respuesta.length() > 0 ? "AT_RESP" : "SERIAL");
+    Serial.println();
+    if (respuesta.length() > 0) {
+      Serial.print("UART_INFO:");
+      Serial.println(respuesta);
+    }
+    prueba.end();
+    return true;
+  }
+
+  prueba.println("AT+ADDRESS?");
+  String respuestaLora = leerRespuestaSoftware(prueba, 500);
+  if (respuestaLora.indexOf("+ADDRESS=") >= 0) {
+    Serial.print("UART_DEV:LORA_RYLR998;RX=");
+    Serial.print(rxPin);
+    Serial.print(";TX=");
+    Serial.print(txPin);
+    Serial.println();
+    Serial.print("LORA_INFO:");
+    Serial.println(respuestaLora);
+    prueba.end();
+    return true;
+  }
+
+  unsigned long inicio = millis();
+  bool gpsDetectado = false;
+  bool coordsListas = false;
+  float lat = 0.0, lon = 0.0;
+  String trama = "";
+
+  while (millis() - inicio < 1500) {
+    while (prueba.available()) {
+      char c = prueba.read();
+      if (c == '$') {
+        gpsDetectado = true;
+        trama = "$";
+        while (prueba.available() && millis() - inicio < 1500) {
+          c = prueba.read();
+          trama += c;
+          if (c == '\n') {
+            break;
+          }
+        }
+        trama.trim();
+        if (parsearCoordenadasNMEA(trama, lat, lon)) {
+          coordsListas = true;
+          break;
+        }
+      }
+    }
+  }
+
+  if (gpsDetectado) {
+    Serial.print("UART_DEV:GPS;RX=");
+    Serial.print(rxPin);
+    Serial.print(";TX=");
+    Serial.print(txPin);
+    Serial.println();
+
+    if (coordsListas) {
+      Serial.print("GPS_COORDS:");
+      Serial.print(lat, 6);
+      Serial.print(",");
+      Serial.println(lon, 6);
+    }
+    prueba.end();
+    return true;
+  }
+
+  prueba.end();
+  return false;
+}
+
+bool escanearPuertosSerial() {
+  for (byte rx = SERIAL_SCAN_MIN_PIN; rx <= SERIAL_SCAN_MAX_PIN; rx++) {
+    for (byte tx = rx + 1; tx <= SERIAL_SCAN_MAX_PIN; tx++) {
+      if (probarPuertoSerial(rx, tx)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
 
 void setup() {
   // Inicializa el puerto USB para enviar resultados al programa Python.
@@ -180,6 +400,10 @@ void setup() {
   for (int i = 0; i < NUM_MODULOS_SPI; i++) {
     pinMode(modulosSPI[i].csPin, OUTPUT);
     digitalWrite(modulosSPI[i].csPin, HIGH);
+  }
+  for (int i = 0; i < NUM_MODULOS_FLASH_SPI; i++) {
+    pinMode(modulosFlashSPI[i].csPin, OUTPUT);
+    digitalWrite(modulosFlashSPI[i].csPin, HIGH);
   }
 
 #if AUTO_SCAN_SPI_CS
@@ -214,8 +438,8 @@ void loop() {
   Serial.println(BOARD_NAME);
 
   // -------- SUBPROCESO 2: DETECCIÓN DEL DISPOSITIVO UART --------
-  // Se ejecuta antes del escaneo I2C porque permite identificar rápidamente
-  // un módulo LoRa o un GPS conectado a la UART.
+  // Se ejecuta antes del escaneo I2C y rebasa una detección fija, revisando
+  // los pares de pines disponibles para GPS, HC-12 y otros módulos seriales.
   detectarGPS();
 
   // -------- SUBPROCESO 3: DETECCIÓN DE DISPOSITIVOS I2C --------
@@ -247,10 +471,12 @@ void detectarI2C() {
     error = Wire.endTransmission();
 
     if (error == 0) {
+      if (found > 0) {
+        Serial.print(",");
+      }
       Serial.print("0x");
       if (address < 16) Serial.print("0");
       Serial.print(address, HEX);
-      Serial.print(",");
       found++;
     }
 
@@ -266,56 +492,87 @@ void detectarI2C() {
 }
 
 
+// ================= PARSEO DE COORDENADAS NMEA =================
+// Convierte el formato ddmm.mmmm (grados+minutos) de una trama NMEA a grados decimales.
+float convertirNMEAaGrados(String valor, char hemisferio) {
+  float crudo = valor.toFloat();
+  int grados = (int)(crudo / 100);
+  float minutos = crudo - (grados * 100);
+  float decimal = grados + (minutos / 60.0);
+
+  if (hemisferio == 'S' || hemisferio == 'W') {
+    decimal = -decimal;
+  }
+
+  return decimal;
+}
+
+// Soporta las tramas GGA y RMC, que son las que incluyen posición.
+bool parsearCoordenadasNMEA(String trama, float &lat, float &lon) {
+  String partes[15];
+  int n = 0;
+  int inicio = 0;
+
+  for (int i = 0; i < (int)trama.length() && n < 15; i++) {
+    if (trama.charAt(i) == ',') {
+      partes[n++] = trama.substring(inicio, i);
+      inicio = i + 1;
+    }
+  }
+  if (n < 15) {
+    partes[n++] = trama.substring(inicio);
+  }
+
+  String tipo = partes[0];
+  String latStr, latHem, lonStr, lonHem;
+
+  if (tipo.endsWith("GGA") && n >= 6) {
+    latStr = partes[2]; latHem = partes[3];
+    lonStr = partes[4]; lonHem = partes[5];
+  } else if (tipo.endsWith("RMC") && n >= 7) {
+    latStr = partes[3]; latHem = partes[4];
+    lonStr = partes[5]; lonHem = partes[6];
+  } else {
+    return false;
+  }
+
+  if (latStr.length() == 0 || lonStr.length() == 0) {
+    return false;
+  }
+
+  lat = convertirNMEAaGrados(latStr, latHem.charAt(0));
+  lon = convertirNMEAaGrados(lonStr, lonHem.charAt(0));
+  return true;
+}
+
 // ================= DETECCIÓN DE DISPOSITIVOS UART =================
 // Distingue entre un módulo LoRa RYLR998, un GPS o un dispositivo desconocido.
 void detectarGPS() {
+  bool detectado = false;
 
-  // Encabezado de la respuesta que interpreta el programa Python.
-  Serial.print("UART_DEV:");
-
-  // -------- SUBPROCESO UART 1: DETECCIÓN DE LORA --------
-  // El RYLR998 responde con +ADDRESS= ante esta consulta.
-  String respuestaLora = consultarLora("AT+ADDRESS?");
-
-  if (respuestaLora.indexOf("+ADDRESS=") >= 0) {
-    Serial.println("LORA_RYLR998");
-
-    // -------- SUBPROCESO UART 2: LECTURA DE CONFIGURACIÓN LORA --------
-    // Obtiene los parámetros principales del módulo identificado.
-    Serial.print("LORA_INFO:");
-    Serial.print("ADDRESS=");
-    Serial.print(respuestaLora);
-    Serial.print(";NETWORKID=");
-    Serial.print(consultarLora("AT+NETWORKID?"));
-    Serial.print(";BAND=");
-    Serial.print(consultarLora("AT+BAND?"));
-    Serial.print(";PARAMETER=");
-    Serial.println(consultarLora("AT+PARAMETER?"));
-    return;
-  }
-
-  // -------- SUBPROCESO UART 3: DETECCIÓN DE GPS --------
-  // Los mensajes NMEA de un GPS comienzan normalmente con '$'.
-  unsigned long t = millis();
-  bool gps = false;
-
-  while (millis() - t < 2000) {
-
-    if (uart.available()) {
-      char c = uart.read();
-
-      if (c == '$') {
-        gps = true;
-        break;
-      }
+  if (uart.available() || uart.peek() >= 0) {
+    String respuestaLora = consultarLora("AT+ADDRESS?");
+    if (respuestaLora.indexOf("+ADDRESS=") >= 0) {
+      Serial.print("UART_DEV:LORA_RYLR998;RX=");
+      Serial.print("HW");
+      Serial.print(";TX=");
+      Serial.print("HW");
+      Serial.println();
+      Serial.print("LORA_INFO:");
+      Serial.println(respuestaLora);
+      detectado = true;
     }
   }
 
-  if (gps) {
-    // Se encontró una trama compatible con la salida NMEA de un GPS.
-    Serial.println("GPS");
-  } else {
-    // No se encontró respuesta LoRa ni una trama GPS en el tiempo establecido.
-    Serial.println("UNKNOWN");
+  if (!detectado) {
+    detectado = escanearPuertosSerial();
+  }
+
+  if (!detectado) {
+    Serial.print("UART_DEV:UNKNOWN;RX=");
+    Serial.print("-");
+    Serial.print(";TX=");
+    Serial.print("-");
+    Serial.println();
   }
 }

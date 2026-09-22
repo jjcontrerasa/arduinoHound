@@ -5,7 +5,7 @@ from tkinter import messagebox, ttk
 
 from .arduino_cli import ArduinoCLI, SKETCH_PATH
 from .estado_ui import BarCarga
-from .persistencia import cargar_boards
+from .persistencia import cargar_boards, guardar_placa, obtener_puerto_default, guardar_puerto_default
 
 
 FRAME_WIDTH = 350
@@ -75,8 +75,21 @@ def mostrar_detalles(val, key):
     )
 
 
+def guardar_asociacion_puerto():
+    puerto = port_var.get().strip() if port_var else ""
+    clave = placa_var.get().strip() if placa_var else ""
+    fqbn = fqbn_var.get().strip() if fqbn_var else ""
+    if not puerto or not fqbn:
+        return
+
+    guardar_placa(f"puerto_{puerto}", fqbn)
+    if clave:
+        guardar_placa(f"puerto_{puerto}_placa", clave)
+
+
 def seleccionar_placa(val, key):
     fqbn_var.set(val["fqbn"])
+    guardar_asociacion_puerto()
     mostrar_detalles(val, key)
 
 
@@ -86,6 +99,8 @@ def filtrar_listado(event=None):
         key for key, value in arduino_boards.items()
         if not texto or texto in key.lower() or texto in value["fqbn"].lower()
     ]
+    if not opciones:
+        opciones = sorted(arduino_boards)
     board_combo["values"] = opciones
     if placa_var.get() not in opciones:
         placa_var.set("")
@@ -97,6 +112,10 @@ def on_placa_seleccionada(event=None):
     value = arduino_boards.get(key)
     if value:
         seleccionar_placa(value, key)
+    else:
+        guardado = next((k for k, v in arduino_boards.items() if v["fqbn"] == key), None)
+        if guardado:
+            seleccionar_placa(arduino_boards[guardado], guardado)
 
 
 def seleccionar_puerto(linea, puerto):
@@ -106,14 +125,26 @@ def seleccionar_puerto(linea, puerto):
     buscar_var.set("")
     detalles_output.delete("1.0", tk.END)
     line_lower = linea.lower()
+    match_key = None
     for key in sorted(arduino_boards, key=len, reverse=True):
         if all(part in line_lower for part in key.split("_")):
-            buscar_var.set(key)
-            fqbn_var.set(arduino_boards[key]["fqbn"])
-            placa_var.set(key)
-            filtrar_listado()
-            mostrar_detalles(arduino_boards[key], key)
-            return
+            match_key = key
+            break
+
+    if match_key:
+        buscar_var.set(match_key)
+        fqbn_var.set(arduino_boards[match_key]["fqbn"])
+        placa_var.set(match_key)
+        guardar_asociacion_puerto()
+        filtrar_listado()
+        mostrar_detalles(arduino_boards[match_key], match_key)
+        return
+
+    board_combo["values"] = sorted(arduino_boards)
+    placa_var.set("")
+    fqbn_var.set("")
+    buscar_var.set("")
+    detalles_output.insert(tk.END, "No se detectó un FQBN exacto para este puerto.\nSelecciona manualmente la placa Arduino disponible.\n")
     filtrar_listado()
 
 
@@ -124,13 +155,15 @@ def escanear_puertos():
         try:
             salida = detectar_placas()
             text_output.delete("1.0", tk.END)
-            text_output.insert(tk.END, salida)
+            text_output.insert(tk.END, "Escaneo de puertos completado.\n")
             for widget in frame_radios.winfo_children():
                 widget.destroy()
+            puertos = []
             for line in salida.splitlines():
                 line = line.strip()
                 if line and not line.startswith("Port"):
                     puerto = line.split()[0]
+                    puertos.append((puerto, line))
                     tk.Radiobutton(
                         frame_radios,
                         text=line,
@@ -142,6 +175,12 @@ def escanear_puertos():
                         anchor="w",
                         command=lambda value=line, selected=puerto: seleccionar_puerto(value, selected),
                     ).pack(anchor="w", fill="x")
+            if puertos:
+                primer_puerto, primer_linea = puertos[0]
+                if primer_puerto != obtener_puerto_default():
+                    guardar_puerto_default(primer_puerto)
+                port_var.set(primer_puerto)
+                seleccionar_puerto(primer_linea, primer_puerto)
         finally:
             text_output.after(0, barCarga.detener)
 
@@ -290,7 +329,13 @@ def crear_panel(root):
 
     detalles_output = tk.Text(main, height=DETAILS_HEIGHT, bg="black", fg=COLOR_TITULO)
     detalles_output.pack()
-    text_output = tk.Text(main, height=TEXT_HEIGHT, bg="black", fg="white")
+    text_output = tk.Text(main, height=TEXT_HEIGHT, bg="black", fg=COLOR_TITULO)
     text_output.pack()
+
+    puerto_guardado = obtener_puerto_default()
+    if puerto_guardado:
+        port_var.set(puerto_guardado)
+
     root.after(500, inicializar_arduino)
+    root.after(600, lambda: escanear_puertos())
     filtrar_listado()

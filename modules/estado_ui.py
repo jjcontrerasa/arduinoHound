@@ -65,3 +65,30 @@ class BarCarga:
         color = "yellow" if self._parpadeo_on else "black"
         self._circulo.itemconfig(self._circulo_id, fill=color)
         self._after_id = self._circulo.after(400, self._parpadear)
+
+
+class IndicadorEstado:
+    """Etiqueta con un círculo de estado que cambia según haya o no dispositivos detectados."""
+
+    def __init__(self, parent, texto, bg="black", fg="white"):
+        self.frame = tk.Frame(parent, bg=bg)
+        tk.Label(self.frame, text=texto, fg=fg, bg=bg, font=("Arial", 9, "bold")).pack(side="left")
+        self._circulo = tk.Canvas(self.frame, width=14, height=14, bg=bg, highlightthickness=0)
+        self._circulo.pack(side="left", padx=(4, 0))
+        self._circulo_id = self._circulo.create_oval(2, 2, 12, 12, fill="", outline="white")
+
+    def pack(self, **kwargs):
+        self.frame.pack(**kwargs)
+        return self
+
+    def encender(self, color="green"):
+        self._circulo.itemconfig(self._circulo_id, fill=color, outline=color)
+
+    def apagar(self):
+        self._circulo.itemconfig(self._circulo_id, fill="", outline="white")
+
+    def resultado(self, encontrado):
+        if encontrado:
+            self.encender("green2")
+        else:
+            self.encender("red")

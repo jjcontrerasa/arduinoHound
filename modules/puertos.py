@@ -1,14 +1,37 @@
+import subprocess
 import tkinter as tk
 import threading
+from tkinter import ttk
 from .deteccion_puertos import obtener_dispositivos, parsear_dispositivos
 from .estado_ui import BarCarga
-from .persistencia import BOARDS_FILE, PLACAS_FILE, cargar_boards, cargar_placas, guardar_placa
+from .persistencia import BOARDS_FILE, PLACAS_FILE, cargar_boards, cargar_placas, guardar_placa, obtener_puerto_default, guardar_puerto_default
 
 COLOR_TITULO = "OliveDrab2"
 COLOR_OK = "green"
 
 PLACAS_JSON = PLACAS_FILE
 BOARDS_JSON = BOARDS_FILE
+
+
+def liberar_puertos():
+    """Intento de liberar puertos bloqueados por Arduino IDE o serial monitor."""
+    procesos = [
+        "arduino.exe",
+        "arduino_debug.exe",
+        "arduino-cli.exe",
+        "Arduino IDE.exe",
+    ]
+    for proceso in procesos:
+        try:
+            subprocess.run([
+                "taskkill",
+                "/F",
+                "/IM",
+                proceso,
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        except Exception:
+            pass
+    return True
 
 # =========================
 # JSON HELPERS
@@ -35,6 +58,17 @@ def crear_panel(root):
     dispositivos_actuales = []
 
     boards = cargar_json(BOARDS_JSON)
+
+    def detectar_fqbn_por_dispositivo(dispositivo):
+        nombre = (dispositivo.get("nombre", "") or "").lower()
+        raw = (dispositivo.get("raw", "") or "").lower()
+        for key, value in boards.items():
+            key_norm = key.lower().replace("_", " ")
+            if key_norm in nombre or key_norm in raw:
+                return value["fqbn"]
+            if any(part in nombre for part in key_norm.split()) or any(part in raw for part in key_norm.split()):
+                return value["fqbn"]
+        return ""
 
     def recargar_placas():
         nonlocal placas_guardadas
@@ -71,46 +105,43 @@ def crear_panel(root):
              fg="white", bg="black").pack(side="left")
 
     fqbn_var = tk.StringVar()
-    entry = tk.Entry(frame_fqbn, textvariable=fqbn_var)
-    entry.pack(side="left", fill="x", expand=True)
+    fqbn_combo = ttk.Combobox(
+        frame_fqbn,
+        textvariable=fqbn_var,
+        state="readonly",
+        values=sorted({v["fqbn"] for v in boards.values()}),
+        width=28,
+    )
+    fqbn_combo.pack(side="left", fill="x", expand=False)
 
     btn_guardar = tk.Button(frame_fqbn,
-        text="💾 Guardar",
+        text="Asociar a la placa",
         bg="black", fg="white",
         highlightbackground="OliveDrab",
-        highlightthickness=1)
+        highlightthickness=1,
+        width=20)
     btn_guardar.pack(side="left", padx=5)
 
-    # ✅ CAMBIO AQUÍ (Listbox con estilo nuevo)
-    listbox = tk.Listbox(
-        main,
-        height=4,
-        bg="gray12",
-        fg="DarkOliveGreen2",
-        selectbackground="OliveDrab",
-        selectforeground="black",
-        highlightbackground="white",
-        highlightthickness=1
-    )
-    listbox.pack(fill="x")
+    def actualizar_opciones_fqbn(seleccion=None):
+        opciones = sorted({v["fqbn"] for v in boards.values()})
+        fqbn_combo["values"] = opciones
+        if seleccion and seleccion in opciones:
+            fqbn_var.set(seleccion)
+        elif opciones:
+            fqbn_var.set(opciones[0])
+        else:
+            fqbn_var.set("")
 
-    # =========================
-    # FILTRO
-    # =========================
     def filtrar(event=None):
-        txt = fqbn_var.get().lower()
-        listbox.delete(0, tk.END)
-
-        for k, v in boards.items():
-            if txt in k.lower() or txt in v["fqbn"]:
-                listbox.insert(tk.END, v["fqbn"])
-
-    entry.bind("<KeyRelease>", filtrar)
-
-    def sel(event):
-        fqbn_var.set(listbox.get(tk.ACTIVE))
-
-    listbox.bind("<<ListboxSelect>>", sel)
+        texto = (fqbn_var.get() or "").strip().lower()
+        opciones = []
+        for v in boards.values():
+            fqbn = v["fqbn"]
+            if not texto or texto in fqbn.lower():
+                opciones.append(fqbn)
+        if not opciones:
+            opciones = sorted({v["fqbn"] for v in boards.values()})
+        fqbn_combo["values"] = sorted(set(opciones))
 
     # =========================
     # DETALLES
@@ -124,13 +155,34 @@ def crear_panel(root):
 
         recargar_placas()
 
+        opciones = sorted({v["fqbn"] for v in boards.values()})
+        fqbn_combo["values"] = opciones
+
+        fqbn_detectado = detectar_fqbn_por_dispositivo(d)
+        fqbn_asociado = placas_guardadas.get(d["nombre"], "")
+
+        if fqbn_asociado and fqbn_asociado in opciones:
+            fqbn_var.set(fqbn_asociado)
+        elif fqbn_detectado and fqbn_detectado in opciones:
+            fqbn_var.set(fqbn_detectado)
+        elif opciones:
+            fqbn_var.set(opciones[0])
+        else:
+            fqbn_var.set("")
+
         detalles.delete("1.0", tk.END)
 
         detalles.insert(tk.END, f"Placa: {d['nombre']}\n")
         detalles.insert(tk.END, f"Puerto: {d['puerto']}\n")
+        detalles.insert(tk.END, f"Fabricante: {d.get('fabricante', '-')}\n")
+        detalles.insert(tk.END, f"Producto: {d.get('producto', '-')}\n")
         detalles.insert(tk.END, f"VID: {d['vid']}\n")
         detalles.insert(tk.END, f"PID: {d['pid']}\n")
         detalles.insert(tk.END, f"Numero de serie USB real: {d['serial']}\n\n")
+
+        if fqbn_detectado:
+            detalles.insert(tk.END, f"FQBN asignado: {fqbn_detectado}\n", "ok")
+            detalles.insert(tk.END, f"Placa detectada: {next((k for k, v in boards.items() if v['fqbn'] == fqbn_detectado), d['nombre'])}\n", "ok")
 
         if d["nombre"] in placas_guardadas:
 
@@ -161,8 +213,10 @@ def crear_panel(root):
                 guardar_json(d["nombre"], fqbn)
                 recargar_placas()
                 mostrar(d)
+                return
 
     btn_guardar.config(command=guardar_actual)
+    fqbn_combo.bind("<<ComboboxSelected>>", lambda event: guardar_actual())
 
     def ejecutar():
 
@@ -192,7 +246,15 @@ def crear_panel(root):
                 command=lambda x=d: mostrar(x)
             ).pack(anchor="w", fill="x")
 
+        if dispositivos_actuales:
+            primer = dispositivos_actuales[0]
+            if primer["puerto"] != obtener_puerto_default():
+                guardar_puerto_default(primer["puerto"])
+            seleccion.set(primer["puerto"])
+            mostrar(primer)
+
     def escanear():
+        liberar_puertos()
         barCarga.iniciar()
 
         def tarea():
@@ -209,4 +271,7 @@ def crear_panel(root):
               highlightbackground="OliveDrab",
               highlightthickness=1).pack()
 
+    puerto_guardado = obtener_puerto_default()
+    if puerto_guardado:
+        seleccion.set(puerto_guardado)
     root.after(500, escanear)

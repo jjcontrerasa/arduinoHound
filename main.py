@@ -18,9 +18,21 @@ BG_COLOR = "black"
 FRAME_BORDER_COLOR = "white"
 COLOR_AZUL = "#3399FF"
 TITLE = "ArduinoHound V2"
-HEADER_HEIGHT = 90
-FOOTER_HEIGHT = 45
-ICON_PATH = Path(__file__).resolve().parent / "assets" / "IconoAHound.ico"
+HEADER_HEIGHT = 100
+FOOTER_HEIGHT = 60
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+ICON_PATH = ASSETS_DIR / "IconoAHound.ico"
+TEXTO_DESARROLLADORES = (
+    "Instituto Politécnico Nacional - Escuela Superior de Ingeniería Mecánica y Eléctrica, Unidad Zacatenco\n"
+    "Software desarrollado por: Juan José Contreras Arteaga\n"
+    "Tesis de Maestría en Ingeniería en Sistemas\n"
+    "Aplicación en la competencia Hidrochallenge, organizada por el IPN y el Centro de Desarrollo Aeroespacial (CDA)\n"
+    "para la competencia Hidrochallenge 2026"
+)
+LOGO_WIDTH = 70
+LOGO_GAP = 60
+LOGO_MARGEN_DERECHO = 40
+LOGOS_HEADER = ["ipn_logo.png", "esime_logo.png", "HC26_logo.png"]
 
 # ---------------- MAIN WINDOW ----------------
 root = tk.Tk()
@@ -82,12 +94,25 @@ tk.Label(
 ).pack(side="left")
 
 header_der = tk.Frame(frame_header, bg=BG_COLOR)
-header_der.pack(side="right", fill="y", padx=10)
-tk.Label(
-    header_der,
-    text="Desarrollado en ESIME Zacatenco del IPN en cooperación con el CDA\npara la competencia Hidrochallenge 2026",
-    fg="white", bg=BG_COLOR, font=("Arial", 10), justify="right"
-).pack(side="right")
+header_der.pack(side="right", fill="y", pady=0)
+
+if ImageTk:
+    ultimo_indice = len(LOGOS_HEADER) - 1
+    for indice, nombre_archivo in enumerate(LOGOS_HEADER):
+        ruta_logo = ASSETS_DIR / nombre_archivo
+        if not ruta_logo.exists():
+            continue
+        try:
+            imagen = Image.open(ruta_logo)
+            alto_nuevo = int(imagen.height * (LOGO_WIDTH / imagen.width))
+            logo_img = ImageTk.PhotoImage(imagen.resize((LOGO_WIDTH, alto_nuevo)))
+            # Separación de 60px entre logos; el último conserva 40px de margen derecho.
+            margen_derecho = LOGO_MARGEN_DERECHO if indice == ultimo_indice else LOGO_GAP
+            logo_label = tk.Label(header_der, image=logo_img, bg=BG_COLOR)
+            logo_label.image = logo_img
+            logo_label.pack(side="left", padx=(0, margen_derecho), pady=0)
+        except Exception:
+            pass
 
 # ---------------- PANEL IZQUIERDO ----------------
 frame_izq = tk.Frame(
@@ -126,6 +151,12 @@ rastrear.crear_panel(frame_der)
 frame_footer = tk.Frame(root, bg=BG_COLOR, height=FOOTER_HEIGHT)
 frame_footer.grid(row=2, column=0, columnspan=3, sticky="ew", padx=15, pady=0)
 frame_footer.grid_propagate(False)  # conserva el alto fijo aunque no tenga contenido
+
+tk.Label(
+    frame_footer,
+    text=TEXTO_DESARROLLADORES,
+    fg="white", bg=BG_COLOR, font=("Arial", 5), justify="center"
+).pack(expand=True)
 
 # ---------------- AJUSTE DINÁMICO ----------------
 def ajustar_ventana(event):

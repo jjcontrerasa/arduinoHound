@@ -1,0 +1,11 @@
+{
+    "puerto_COM4": "arduino:megaavr:nona4809",
+    "puerto_COM4_placa": "nano_every",
+    "FTDI": "arduino:avr:mega",
+    "puerto_COM3": "arduino:avr:nano:cpu=atmega328old",
+    "puerto_COM3_placa": "nano_oldboot",
+    "Arduino Nano": "arduino:megaavr:nona4809",
+    "Serial USB": "arduino:avr:uno",
+    "puerto_COM5": "arduino:avr:uno",
+    "puerto_COM5_placa": "uno"
+}
