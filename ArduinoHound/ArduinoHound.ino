@@ -437,14 +437,12 @@ void loop() {
   Serial.print("BOARD:");
   Serial.println(BOARD_NAME);
 
-  // -------- SUBPROCESO 2: DETECCIÓN DEL DISPOSITIVO UART --------
-  // Se ejecuta antes del escaneo I2C y rebasa una detección fija, revisando
-  // los pares de pines disponibles para GPS, HC-12 y otros módulos seriales.
-  detectarGPS();
-
-  // -------- SUBPROCESO 3: DETECCIÓN DE DISPOSITIVOS I2C --------
-  // Se ejecuta al final porque revisa todas las direcciones I2C disponibles.
+  // -------- SUBPROCESO 2: DETECCIÓN DE DISPOSITIVOS I2C --------
   detectarI2C();
+
+  // -------- SUBPROCESO 3: DETECCIÓN UART Y GPS --------
+  // La detección GPS forma parte de esta fase y no depende de obtener fix.
+  detectarGPS();
 
   // -------- SUBPROCESO 4: DETECCIÓN DE DISPOSITIVOS SPI --------
   detectarSPI();

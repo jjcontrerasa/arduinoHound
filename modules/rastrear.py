@@ -187,13 +187,6 @@ def crear_panel(root):
         salida.insert(tk.END, f"Puerto: {puerto}\n", "ok")
         salida.insert(tk.END, f"Placa detectada: {nombre_placa}\n\n", "ok")
 
-        if gps_detectado[0]:
-            if gps_coords_actuales[0]:
-                salida.insert(tk.END, "GPS: conectado y coordenadas disponibles\n", "ok")
-            else:
-                salida.insert(tk.END, "GPS: conectado, esperando coordenadas\n", "ok")
-            salida.insert(tk.END, "\n")
-
         i2c_hay = str(datos.get('i2c', 'ninguno')).strip().lower() not in {'-', '', 'none', 'ninguno'}
         uart_hay = str(datos.get('uart', 'ninguno')).strip().lower() not in {'-', '', 'none', 'ninguno'}
         spi_hay = str(datos.get('spi', 'ninguno')).strip().lower() not in {'-', '', 'none', 'ninguno'}
@@ -211,6 +204,15 @@ def crear_panel(root):
         if datos["lora"] != "-":
             salida.insert(tk.END, "\n=== LORA UART ===\n")
             salida.insert(tk.END, f"{datos['lora']}\n")
+
+        salida.insert(tk.END, "\n=== GPS ===\n")
+        if gps_detectado[0]:
+            if gps_coords_actuales[0]:
+                salida.insert(tk.END, "GPS: conectado y coordenadas disponibles\n", "ok")
+            else:
+                salida.insert(tk.END, "GPS: conectado, esperando coordenadas\n", "ok")
+        else:
+            salida.insert(tk.END, "GPS: no detectado\n")
 
         salida.insert(tk.END, "\n=== SPI ===\n")
         salida.insert(tk.END, f"{datos['spi']}\n")

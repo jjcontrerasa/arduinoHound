@@ -1,7 +1,10 @@
 import subprocess
 import threading
+import shutil
+import tempfile
 import tkinter as tk
-from tkinter import messagebox, ttk
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
 
 from .arduino_cli import ArduinoCLI, SKETCH_PATH
 from .estado_ui import BarCarga
@@ -16,8 +19,6 @@ COLOR_TITULO = "OliveDrab2"
 
 arduino_boards = cargar_boards()
 arduino = ArduinoCLI()
-BACKUP_SKETCH_PATH = SKETCH_PATH
-
 buscar_var = None
 fqbn_var = None
 port_var = None
@@ -193,6 +194,77 @@ def _cargar(fqbn, sketch_path):
     arduino.upload(port_var.get(), fqbn, sketch_path)
 
 
+def _mostrar_confirmacion_sketch(nombre_archivo, nombre_placa):
+    ventana = tk.Toplevel(text_output.winfo_toplevel())
+    ventana.title("Confirmar carga de sketch")
+    ventana.configure(bg="black")
+    ventana.resizable(False, False)
+    ventana.transient(text_output.winfo_toplevel())
+    ventana.grab_set()
+
+    respuesta = [False]
+    contenido = tk.Frame(ventana, bg="black")
+    contenido.pack(padx=24, pady=20)
+
+    tk.Label(
+        contenido,
+        text="Se cargará el Sketch:",
+        fg="white",
+        bg="black",
+        anchor="w",
+    ).pack(fill="x")
+    tk.Label(
+        contenido,
+        text=nombre_archivo,
+        fg="white",
+        bg="black",
+        font=("Arial", 10, "bold"),
+        anchor="w",
+    ).pack(fill="x", pady=(0, 12))
+    tk.Label(
+        contenido,
+        text=(
+            "Esto eliminará el sketch de Arduino Hound cargado previamente "
+            f"en la placa seleccionada: {nombre_placa}.\n\n"
+            "¿Desea continuar?"
+        ),
+        fg="white",
+        bg="black",
+        justify="left",
+        anchor="w",
+    ).pack(fill="x")
+
+    botones = tk.Frame(contenido, bg="black")
+    botones.pack(pady=(18, 0))
+
+    def aceptar():
+        respuesta[0] = True
+        ventana.destroy()
+
+    tk.Button(
+        botones,
+        text="Cancelar",
+        command=ventana.destroy,
+        bg="black",
+        fg="white",
+        highlightbackground="OliveDrab",
+        highlightthickness=1,
+    ).pack(side="left", padx=5)
+    tk.Button(
+        botones,
+        text="Aceptar",
+        command=aceptar,
+        bg="black",
+        fg="white",
+        highlightbackground="OliveDrab",
+        highlightthickness=1,
+    ).pack(side="left", padx=5)
+
+    ventana.protocol("WM_DELETE_WINDOW", ventana.destroy)
+    ventana.wait_window()
+    return respuesta[0]
+
+
 def cargar_sketch():
     if not fqbn_var.get() or not port_var.get():
         messagebox.showerror("Error", "Selecciona FQBN y puerto.")
@@ -242,51 +314,43 @@ def cargar_sketch():
 
 
 def cargar_respaldo():
-    if not port_var.get():
-        messagebox.showerror("Error", "Selecciona puerto.")
+    archivo = filedialog.askopenfilename(
+        title="Seleccionar sketch de Arduino",
+        filetypes=(
+            ("Sketch de Arduino", "*.ino *.pde *.cpp *.c *.h"),
+            ("Todos los archivos", "*.*"),
+        ),
+    )
+    if not archivo:
         return
-    fqbn = fqbn_var.get()
+    if not port_var.get() or not fqbn_var.get():
+        messagebox.showerror("Error", "Selecciona puerto y placa.")
+        return
 
-    def preguntar_todas():
-        if not messagebox.askyesno("Modo avanzado", "Intentar con todas las placas?"):
-            return
-        intentar_todas()
+    nombre_placa = placa_var.get().strip() or fqbn_var.get().strip()
+    nombre_archivo = Path(archivo).name
+    if not _mostrar_confirmacion_sketch(nombre_archivo, nombre_placa):
+        return
 
-    def intentar_todas():
-        barCarga.iniciar()
+    fqbn = fqbn_var.get().strip()
 
-        def tarea():
-            boards = sorted(arduino_boards.items(), key=lambda item: 0 if item[0] == "nano_oldboot" else 1)
-            for key, value in boards:
-                try:
-                    text_output.insert(tk.END, f"Intentando: {key}\n")
-                    _cargar(value["fqbn"], BACKUP_SKETCH_PATH)
-                    text_output.after(0, lambda k=key: _finalizar(lambda: messagebox.showinfo("Éxito", f"Cargado con:\n{k}")))
-                    return
-                except subprocess.CalledProcessError:
-                    continue
-            text_output.after(0, lambda: _finalizar(lambda: messagebox.showerror("Error", "No se pudo cargar.")))
+    def tarea():
+        carpeta_temporal = None
+        try:
+            carpeta_temporal = tempfile.mkdtemp(prefix="ArduinoHoundSketch_")
+            ruta_temporal = Path(carpeta_temporal) / Path(archivo).name
+            shutil.copy2(archivo, ruta_temporal)
+            text_output.after(0, lambda: text_output.insert(tk.END, f"Cargando: {nombre_archivo}\n"))
+            _cargar(fqbn, ruta_temporal.parent)
+            text_output.after(0, lambda: _finalizar(lambda: messagebox.showinfo("Éxito", f"Sketch cargado correctamente en:\n{nombre_placa}")))
+        except (OSError, subprocess.CalledProcessError) as error:
+            text_output.after(0, lambda: _finalizar(lambda: messagebox.showerror("Error", f"No se pudo cargar el sketch:\n{error}")))
+        finally:
+            if carpeta_temporal:
+                shutil.rmtree(carpeta_temporal, ignore_errors=True)
 
-        threading.Thread(target=tarea, daemon=True).start()
-
-    def intentar_actual():
-        barCarga.iniciar()
-
-        def tarea():
-            try:
-                text_output.insert(tk.END, f"\nIntentando auto: {fqbn}\n")
-                _cargar(fqbn, BACKUP_SKETCH_PATH)
-                text_output.after(0, lambda: _finalizar(lambda: messagebox.showinfo("Éxito", f"Cargado con:\n{fqbn}")))
-            except subprocess.CalledProcessError:
-                text_output.insert(tk.END, f"Falló: {fqbn}\n")
-                text_output.after(0, lambda: _finalizar(preguntar_todas))
-
-        threading.Thread(target=tarea, daemon=True).start()
-
-    if fqbn:
-        intentar_actual()
-    else:
-        preguntar_todas()
+    barCarga.iniciar()
+    threading.Thread(target=tarea, daemon=True).start()
 
 
 def crear_panel(root):
