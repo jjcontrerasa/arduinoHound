@@ -7,12 +7,13 @@ para compatibilidad con el uso histórico: python cargarSketch.py
 import tkinter as tk
 
 from modules.cargarSketch import *
+from modules.rutas import configurar_ventana
 
 
 if __name__ == "__main__":
     root = tk.Tk()
     root.title("Cargar Sketch en Arduino")
-    root.configure(bg="black")
+    configurar_ventana(root)
     root.geometry("370x720")
     crear_panel(root)
     root.mainloop()

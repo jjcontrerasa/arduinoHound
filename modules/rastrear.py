@@ -6,6 +6,7 @@ from .deteccion_puertos import obtener_puertos, parsear_puertos
 from .estado_ui import BarCarga, IndicadorEstado
 from .persistencia import cargar_placas
 from .rastreo_serial import leer_datos
+from .rutas import configurar_ventana
 
 COLOR_TITULO = "OliveDrab2"
 COLOR_OK = "green"
@@ -260,7 +261,7 @@ def crear_panel(root):
 
         ventana = tk.Toplevel(root)
         ventana.title("Ubicación GPS")
-        ventana.configure(bg="black")
+        configurar_ventana(ventana)
         ventana.resizable(False, False)
         ventana.transient(root)
         ventana.grab_set()

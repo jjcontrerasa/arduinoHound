@@ -1,5 +1,6 @@
 import os
 import sys
+import tkinter as tk
 from pathlib import Path
 
 
@@ -18,6 +19,9 @@ def resource_path(*parts):
     return RESOURCE_PATH.joinpath(*parts)
 
 
+ICON_PATH = resource_path("assets", "IconoAHound.ico")
+
+
 def user_data_path(*parts):
     path = USER_DATA_PATH.joinpath(*parts)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -26,3 +30,21 @@ def user_data_path(*parts):
 
 def arduino_cli_path():
     return resource_path("arduino-cli.exe")
+
+
+def configurar_ventana(ventana):
+    ventana.configure(bg="black")
+    if ICON_PATH.exists():
+        try:
+            ventana.iconbitmap(str(ICON_PATH))
+        except tk.TclError:
+            pass
+    try:
+        import ctypes
+        hwnd = ctypes.windll.user32.GetParent(ventana.winfo_id())
+        valor = ctypes.c_int(1)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, 20, ctypes.byref(valor), ctypes.sizeof(valor)
+        )
+    except (AttributeError, OSError):
+        pass
