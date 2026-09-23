@@ -18,7 +18,14 @@ BOARDS_SQL_URL = (
 _CATALOGO_SINCRONIZADO = False
 PLACAS_FILE = user_data_path("placas.json")
 I2C_FILE = user_data_path("dispositivos_i2c.json")
+I2C_CACHE_FILE = user_data_path("dispositivos_i2c.cache.json")
+I2C_HASH_FILE = user_data_path("dispositivos_i2c.sha256")
+I2C_URL = (
+    "https://raw.githubusercontent.com/jjcontrerasa/arduinoHound/"
+    "main/data/dispositivos_i2c.json"
+)
 PUERTOS_FILE = user_data_path("puertos.json")
+_I2C_SINCRONIZADO = False
 
 
 def cargar_json(path, default=None):
@@ -113,6 +120,53 @@ def cargar_boards():
 
 def cargar_placas():
     return cargar_json(PLACAS_FILE, {})
+
+
+def _actualizar_catalogo_i2c():
+    try:
+        request = Request(I2C_URL, headers={"User-Agent": "ArduinoHound/1.0"})
+        with urlopen(request, timeout=5) as response:
+            remoto = response.read().decode("utf-8")
+        registros = json.loads(remoto)
+        if not isinstance(registros, list):
+            return False
+    except (OSError, URLError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+
+    hash_remoto = hashlib.sha256(remoto.encode("utf-8")).hexdigest()
+    if _leer_texto(I2C_HASH_FILE).strip() == hash_remoto and I2C_FILE.exists():
+        return False
+
+    try:
+        I2C_CACHE_FILE.write_text(remoto, encoding="utf-8")
+        I2C_HASH_FILE.write_text(hash_remoto, encoding="ascii")
+        guardar_json(I2C_FILE, registros)
+        return True
+    except OSError:
+        return False
+
+
+def _crear_json_i2c_desde_respaldo():
+    if I2C_FILE.exists():
+        return
+    respaldo = _leer_texto(I2C_CACHE_FILE) or _leer_texto(resource_path("data", "dispositivos_i2c.json"))
+    if not respaldo:
+        return
+    try:
+        registros = json.loads(respaldo)
+        if isinstance(registros, list):
+            guardar_json(I2C_FILE, registros)
+    except (OSError, json.JSONDecodeError):
+        pass
+
+
+def cargar_i2c():
+    global _I2C_SINCRONIZADO
+    if not _I2C_SINCRONIZADO:
+        _actualizar_catalogo_i2c()
+        _I2C_SINCRONIZADO = True
+    _crear_json_i2c_desde_respaldo()
+    return cargar_json(I2C_FILE, [])
 
 
 def guardar_placa(nombre, fqbn):

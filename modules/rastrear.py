@@ -2,9 +2,11 @@ import tkinter as tk
 import subprocess
 import threading
 import webbrowser
+import re
+from tkinter import ttk
 from .deteccion_puertos import obtener_puertos, parsear_puertos
 from .estado_ui import BarCarga, IndicadorEstado
-from .persistencia import cargar_placas
+from .persistencia import cargar_i2c, cargar_placas
 from .rastreo_serial import leer_datos
 from .rutas import configurar_ventana
 
@@ -86,6 +88,7 @@ def crear_panel(root):
     dispositivos = []
     gps_coords_actuales = [None]
     gps_detectado = [False]
+    catalogo_i2c = cargar_i2c()
 
     outer = tk.Frame(root, bg="black",
                      highlightbackground="white",
@@ -135,10 +138,75 @@ def crear_panel(root):
                            highlightthickness=1)
     frame_lista.pack(fill="both", expand=True)
 
+    frame_i2c = tk.Frame(main, bg="black")
+    frame_i2c.pack(fill="x", padx=5, pady=(5, 0))
+
+    tk.Label(frame_i2c, text="Dispositivos I2C detectados",
+             fg="white", bg="black", anchor="w").pack(fill="x")
+
+    estilo_tabla = ttk.Style()
+    estilo_tabla.configure(
+        "ArduinoHound.Treeview",
+        background="black",
+        foreground="white",
+        fieldbackground="black",
+        rowheight=22,
+    )
+    estilo_tabla.configure(
+        "ArduinoHound.Treeview.Heading",
+        background="OliveDrab",
+        foreground="white",
+    )
+    tabla_i2c = ttk.Treeview(
+        frame_i2c,
+        columns=("direccion", "dispositivo", "descripcion"),
+        show="headings",
+        height=5,
+        style="ArduinoHound.Treeview",
+    )
+    tabla_i2c.heading("direccion", text="Dirección")
+    tabla_i2c.heading("dispositivo", text="Dispositivo posible")
+    tabla_i2c.heading("descripcion", text="Descripción")
+    tabla_i2c.column("direccion", width=50, minwidth=50, anchor="center", stretch=False)
+    tabla_i2c.column("dispositivo", width=220, anchor="w")
+    tabla_i2c.column("descripcion", width=360, anchor="w")
+    tabla_i2c.pack(side="left", fill="x", expand=True)
+
+    tabla_scroll = ttk.Scrollbar(frame_i2c, orient="vertical", command=tabla_i2c.yview)
+    tabla_scroll.pack(side="right", fill="y")
+    tabla_i2c.configure(yscrollcommand=tabla_scroll.set)
+
     salida = tk.Text(main, bg="black", fg="white", height=10)
     salida.pack(fill="both", expand=True)
 
     salida.tag_config("ok", foreground=COLOR_OK)
+
+    def actualizar_tabla_i2c(valor):
+        tabla_i2c.delete(*tabla_i2c.get_children())
+        direcciones = []
+        for direccion in re.findall(r"0x[0-9a-fA-F]{1,2}", str(valor or "")):
+            direccion = direccion.upper().replace("X", "x")
+            if direccion.lower() not in {item.lower() for item in direcciones}:
+                direcciones.append(direccion)
+
+        registros_por_direccion = {}
+        for registro in catalogo_i2c:
+            direccion = str(registro.get("direccion", "")).lower()
+            registros_por_direccion.setdefault(direccion, []).append(registro)
+
+        for direccion in direcciones:
+            registros = registros_por_direccion.get(direccion.lower(), [])
+            if not registros:
+                tabla_i2c.insert("", "end", values=(direccion, "No identificado", "Dirección I2C detectada"))
+                continue
+            registro = registros[0]
+            tabla_i2c.insert(
+                "", "end",
+                values=(direccion, registro.get("dispositivo", "-"), registro.get("descripcion", "-")),
+            )
+
+        if not direcciones:
+            tabla_i2c.insert("", "end", values=("-", "Ninguno", "No se detectaron dispositivos I2C"))
 
     frame_debug = tk.Frame(main, bg="black", highlightbackground="white", highlightthickness=1)
     frame_debug.pack(fill="both", expand=True, pady=(5, 0))
@@ -188,6 +256,11 @@ def crear_panel(root):
         salida.insert(tk.END, f"Puerto: {puerto}\n", "ok")
         salida.insert(tk.END, f"Placa detectada: {nombre_placa}\n\n", "ok")
 
+        valor_uart = str(datos.get("uart", ""))
+        if "GPS" in valor_uart.upper():
+            gps_detectado[0] = True
+            boton_gps.config(text="GPS detectado", state="normal" if gps_coords_actuales[0] else "disabled")
+
         i2c_hay = str(datos.get('i2c', 'ninguno')).strip().lower() not in {'-', '', 'none', 'ninguno'}
         uart_hay = str(datos.get('uart', 'ninguno')).strip().lower() not in {'-', '', 'none', 'ninguno'}
         spi_hay = str(datos.get('spi', 'ninguno')).strip().lower() not in {'-', '', 'none', 'ninguno'}
@@ -197,7 +270,8 @@ def crear_panel(root):
         indicador_spi.resultado(spi_hay)
 
         salida.insert(tk.END, "=== I2C ===\n")
-        salida.insert(tk.END, f"{datos['i2c']}\n\n")
+        actualizar_tabla_i2c(datos["i2c"])
+        salida.insert(tk.END, "Consultar la tabla superior para ver las coincidencias por dirección.\n\n")
 
         salida.insert(tk.END, "=== UART ===\n")
         salida.insert(tk.END, f"{datos['uart']}\n")

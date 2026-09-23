@@ -32,6 +32,7 @@
 #endif
 
 #define UART_BAUD 9600
+#define GPS_BAUD 9600
 #define SERIAL_SCAN_MIN_PIN 2
 #define SERIAL_SCAN_MAX_PIN 13
 
@@ -144,6 +145,15 @@ bool probarModuloSPI(byte csPin, int modulo) {
 }
 
 void detectarSPI() {
+  for (int i = 0; i < NUM_MODULOS_SPI; i++) {
+    pinMode(modulosSPI[i].csPin, OUTPUT);
+    digitalWrite(modulosSPI[i].csPin, HIGH);
+  }
+  for (int i = 0; i < NUM_MODULOS_FLASH_SPI; i++) {
+    pinMode(modulosFlashSPI[i].csPin, OUTPUT);
+    digitalWrite(modulosFlashSPI[i].csPin, HIGH);
+  }
+
   bool encontrados[NUM_MODULOS_SPI] = {false};
   bool encontradosFlash[NUM_MODULOS_FLASH_SPI] = {false};
 
@@ -263,6 +273,38 @@ String leerRespuestaSoftware(SoftwareSerial &puerto, unsigned long timeout) {
   return respuesta;
 }
 
+bool leerGPSSoftware(SoftwareSerial &puerto, unsigned long timeout, float &lat, float &lon) {
+  unsigned long inicio = millis();
+  bool detectado = false;
+  String trama = "";
+
+  while (millis() - inicio < timeout) {
+    while (puerto.available()) {
+      char c = puerto.read();
+      if (c == '$') {
+        detectado = true;
+        trama = "$";
+      } else if (trama.length() > 0) {
+        trama += c;
+        if (c == '\n') {
+          trama.trim();
+          String cabecera = trama;
+          cabecera.toUpperCase();
+          if (cabecera.startsWith("$GP") || cabecera.startsWith("$GN") ||
+              cabecera.startsWith("$GL") || cabecera.startsWith("$BD")) {
+            detectado = true;
+            parsearCoordenadasNMEA(trama, lat, lon);
+          }
+          trama = "";
+        }
+      }
+    }
+    delay(5);
+  }
+
+  return detectado;
+}
+
 bool esRespuestaTransceptor(const String &respuesta) {
   String texto = respuesta;
   texto.toUpperCase();
@@ -283,14 +325,42 @@ bool esRespuestaTransceptor(const String &respuesta) {
   );
 }
 
-bool probarPuertoSerial(byte rxPin, byte txPin) {
+void informarGPS(byte rxPin, byte txPin, float lat, float lon, bool coordsListas) {
+  Serial.print("UART_DEV:GPS;RX=");
+  Serial.print(rxPin);
+  Serial.print(";TX=");
+  Serial.print(txPin);
+  Serial.println();
+
+  if (coordsListas) {
+    Serial.print("GPS_COORDS:");
+    Serial.print(lat, 6);
+    Serial.print(",");
+    Serial.println(lon, 6);
+  }
+}
+
+bool probarPuertoSerial(byte rxPin, byte txPin, bool escucharGPSPrimero = false) {
   if (rxPin == txPin || !esPinSerialPermitido(rxPin) || !esPinSerialPermitido(txPin)) {
     return false;
   }
 
   SoftwareSerial prueba(rxPin, txPin);
-  prueba.begin(UART_BAUD);
+  prueba.begin(escucharGPSPrimero ? GPS_BAUD : UART_BAUD);
   delay(200);
+
+  if (escucharGPSPrimero) {
+    float lat = 0.0, lon = 0.0;
+    bool gpsDetectado = leerGPSSoftware(prueba, 1800, lat, lon);
+    if (gpsDetectado) {
+      informarGPS(rxPin, txPin, lat, lon, lat != 0.0 || lon != 0.0);
+      prueba.end();
+      return true;
+    }
+    prueba.end();
+    prueba.begin(UART_BAUD);
+    delay(50);
+  }
 
   prueba.println("AT");
   String respuesta = leerRespuestaSoftware(prueba, 500);
@@ -324,47 +394,14 @@ bool probarPuertoSerial(byte rxPin, byte txPin) {
     return true;
   }
 
-  unsigned long inicio = millis();
-  bool gpsDetectado = false;
-  bool coordsListas = false;
+  prueba.end();
+  prueba.begin(GPS_BAUD);
+  delay(50);
   float lat = 0.0, lon = 0.0;
-  String trama = "";
-
-  while (millis() - inicio < 1500) {
-    while (prueba.available()) {
-      char c = prueba.read();
-      if (c == '$') {
-        gpsDetectado = true;
-        trama = "$";
-        while (prueba.available() && millis() - inicio < 1500) {
-          c = prueba.read();
-          trama += c;
-          if (c == '\n') {
-            break;
-          }
-        }
-        trama.trim();
-        if (parsearCoordenadasNMEA(trama, lat, lon)) {
-          coordsListas = true;
-          break;
-        }
-      }
-    }
-  }
+  bool gpsDetectado = leerGPSSoftware(prueba, 1500, lat, lon);
 
   if (gpsDetectado) {
-    Serial.print("UART_DEV:GPS;RX=");
-    Serial.print(rxPin);
-    Serial.print(";TX=");
-    Serial.print(txPin);
-    Serial.println();
-
-    if (coordsListas) {
-      Serial.print("GPS_COORDS:");
-      Serial.print(lat, 6);
-      Serial.print(",");
-      Serial.println(lon, 6);
-    }
+    informarGPS(rxPin, txPin, lat, lon, lat != 0.0 || lon != 0.0);
     prueba.end();
     return true;
   }
@@ -374,8 +411,16 @@ bool probarPuertoSerial(byte rxPin, byte txPin) {
 }
 
 bool escanearPuertosSerial() {
+  if (probarPuertoSerial(4, 5, true) || probarPuertoSerial(5, 4, true) ||
+      probarPuertoSerial(2, 3, true) || probarPuertoSerial(3, 2, true)) {
+    return true;
+  }
+
   for (byte rx = SERIAL_SCAN_MIN_PIN; rx <= SERIAL_SCAN_MAX_PIN; rx++) {
     for (byte tx = rx + 1; tx <= SERIAL_SCAN_MAX_PIN; tx++) {
+      if ((rx == 2 && tx == 3) || (rx == 3 && tx == 2)) {
+        continue;
+      }
       if (probarPuertoSerial(rx, tx)) {
         return true;
       }
@@ -544,11 +589,45 @@ bool parsearCoordenadasNMEA(String trama, float &lat, float &lon) {
 }
 
 // ================= DETECCIÓN DE DISPOSITIVOS UART =================
+bool escucharGPSHardware() {
+#if defined(ARDUINO_MEGAAVR_NANO_EVERY) || defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_MEGA1280) || defined(ARDUINO_AVR_LEONARDO) || defined(ARDUINO_AVR_MICRO)
+  unsigned long inicio = millis();
+  bool detectado = false;
+  String trama = "";
+  float lat = 0.0, lon = 0.0;
+
+  while (millis() - inicio < 1800) {
+    while (uart.available()) {
+      char c = uart.read();
+      if (c == '$') {
+        detectado = true;
+        trama = "$";
+      } else if (trama.length() > 0) {
+        trama += c;
+        if (c == '\n') {
+          trama.trim();
+          parsearCoordenadasNMEA(trama, lat, lon);
+          trama = "";
+        }
+      }
+    }
+    delay(5);
+  }
+
+  if (detectado) {
+    informarGPS(0, 0, lat, lon, lat != 0.0 || lon != 0.0);
+  }
+  return detectado;
+#else
+  return false;
+#endif
+}
+
 // Distingue entre un módulo LoRa RYLR998, un GPS o un dispositivo desconocido.
 void detectarGPS() {
-  bool detectado = false;
+  bool detectado = escucharGPSHardware();
 
-  if (uart.available() || uart.peek() >= 0) {
+  if (!detectado && (uart.available() || uart.peek() >= 0)) {
     String respuestaLora = consultarLora("AT+ADDRESS?");
     if (respuestaLora.indexOf("+ADDRESS=") >= 0) {
       Serial.print("UART_DEV:LORA_RYLR998;RX=");

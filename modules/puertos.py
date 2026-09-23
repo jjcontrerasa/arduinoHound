@@ -2,11 +2,17 @@ import subprocess
 import tkinter as tk
 import threading
 import re
+import time
 from tkinter import ttk
 from .deteccion_puertos import obtener_dispositivos, parsear_dispositivos
 from .estado_ui import BarCarga
 from .persistencia import PLACAS_FILE, cargar_boards, cargar_placas, guardar_placa, obtener_puerto_default, guardar_puerto_default
 from .rutas import resource_path
+
+try:
+    import serial
+except ImportError:  # pragma: no cover
+    serial = None
 
 COLOR_TITULO = "OliveDrab2"
 COLOR_OK = "green"
@@ -21,6 +27,8 @@ def _perfil_firma_avr(mcu):
         return (("arduino", "atmega328p", "115200"), ("arduino", "atmega328p", "57600"))
     if "ATMEGA2560" in mcu:
         return (("arduino", "atmega2560", "115200"),)
+    if "ATMEGA4809" in mcu:
+        return (("jtag2updi", "atmega4809", "115200"),)
     if "ATMEGA32U4" in mcu:
         return (("avr109", "atmega32u4", "57600"),)
     if "ATMEGA168" in mcu:
@@ -36,12 +44,29 @@ def leer_firma_avr(puerto, mcu):
     if not perfiles:
         return "No disponible (se requiere un bootloader AVR compatible)"
 
-    herramienta = resource_path("packages", "arduino", "tools", "avrdude", "8.0.0-arduino1", "bin", "avrdude.exe")
+    if "ATMEGA4809" in (mcu or "").upper():
+        herramientas = [resource_path("packages", "arduino", "tools", "avrdude", "8.0.0-arduino1", "bin", "avrdude.exe")]
+    else:
+        herramientas = [
+            resource_path("packages", "arduino", "tools", "avrdude", "6.3.0-arduino17", "bin", "avrdude.exe"),
+            resource_path("packages", "arduino", "tools", "avrdude", "8.0.0-arduino1", "bin", "avrdude.exe"),
+        ]
+    herramienta = next((ruta for ruta in herramientas if ruta.exists()), herramientas[0])
     configuracion = herramienta.parent.parent / "etc" / "avrdude.conf"
     if not herramienta.exists() or not configuracion.exists():
         return "No disponible (avrdude no encontrado)"
 
     for programador, microcontrolador, velocidad in perfiles:
+        if serial is not None and "ATMEGA32U4" not in (mcu or "").upper():
+            try:
+                with serial.Serial(puerto, 1200, timeout=0) as conexion:
+                    conexion.dtr = False
+                    time.sleep(0.1)
+                    conexion.dtr = True
+                time.sleep(0.35)
+            except (OSError, serial.SerialException):
+                pass
+
         comando = [
             str(herramienta), "-C", str(configuracion), "-v", "-n",
             "-c", programador, "-p", microcontrolador,
@@ -120,11 +145,10 @@ def crear_panel(root):
     def detectar_fqbn_por_dispositivo(dispositivo):
         nombre = (dispositivo.get("nombre", "") or "").lower()
         raw = (dispositivo.get("raw", "") or "").lower()
-        for key, value in boards.items():
+        for key, value in sorted(boards.items(), key=lambda item: len(item[0]), reverse=True):
             key_norm = key.lower().replace("_", " ")
-            if key_norm in nombre or key_norm in raw:
-                return value["fqbn"]
-            if any(part in nombre for part in key_norm.split()) or any(part in raw for part in key_norm.split()):
+            patron = r"(?<!\w)" + r"\s+".join(re.escape(part) for part in key_norm.split()) + r"(?!\w)"
+            if re.search(patron, nombre) or re.search(patron, raw):
                 return value["fqbn"]
         return ""
 
@@ -230,7 +254,10 @@ def crear_panel(root):
         fqbn_combo["values"] = opciones
 
         fqbn_detectado = detectar_fqbn_por_dispositivo(d)
-        fqbn_asociado = placas_guardadas.get(d["nombre"], "")
+        fqbn_asociado = (
+            placas_guardadas.get(f"puerto_{d['puerto']}", "")
+            or placas_guardadas.get(d["nombre"], "")
+        )
 
         if fqbn_asociado and fqbn_asociado in opciones:
             fqbn_var.set(fqbn_asociado)
@@ -263,15 +290,11 @@ def crear_panel(root):
             detalles.insert(tk.END, f"FQBN asignado: {fqbn_detectado}\n", "ok")
             detalles.insert(tk.END, f"Placa detectada: {next((k for k, v in boards.items() if v['fqbn'] == fqbn_detectado), d['nombre'])}\n", "ok")
 
-        if d["nombre"] in placas_guardadas:
-
-            fqbn = placas_guardadas[d["nombre"]]
-
-            mcu = "-"
-            for v in boards.values():
-                if v["fqbn"] == fqbn:
-                    mcu = v.get("mcu", "-")
-
+        if fqbn_asociado:
+            mcu = next(
+                (v.get("mcu", "-") for v in boards.values() if v["fqbn"] == fqbn_asociado),
+                "-",
+            )
             detalles.insert(tk.END, f"Placa asociada: {mcu}\n", "ok")
 
         detalles.insert(tk.END, "\n=== DETALLE SISTEMA ===\n")
