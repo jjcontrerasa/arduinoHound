@@ -500,12 +500,32 @@ void loop() {
 
 
 // ================= DETECCIÓN DE DISPOSITIVOS I2C =================
+void informarPinesI2C() {
+  Serial.print("I2C_PINS:SDA=");
+#if defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_MEGA1280)
+  Serial.print("D20");
+#elif defined(ARDUINO_AVR_LEONARDO) || defined(ARDUINO_AVR_MICRO)
+  Serial.print("D2");
+#else
+  Serial.print("A4");
+#endif
+  Serial.print(";SCL=");
+#if defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_MEGA1280)
+  Serial.println("D21");
+#elif defined(ARDUINO_AVR_LEONARDO) || defined(ARDUINO_AVR_MICRO)
+  Serial.println("D3");
+#else
+  Serial.println("A5");
+#endif
+}
+
 // Recorre las direcciones I2C y reporta las que responden correctamente.
 void detectarI2C() {
 
   byte error, address;
   int found = 0;
 
+  informarPinesI2C();
   Serial.print("I2C:");
 
   for (address = 1; address < 127; address++) {

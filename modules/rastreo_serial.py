@@ -136,7 +136,7 @@ def leer_datos(puerto, baudrate=115200, timeout=2, on_evento=None):
     con tipo en {"uart", "i2c", "spi", "gps_coords"}, para poder actualizar
     la interfaz en tiempo real conforme cada protocolo termina de escanear.
     """
-    datos = {"board": "-", "i2c": "-", "uart": "-", "lora": "-", "spi": "-", "gps_coords": None}
+    datos = {"board": "-", "i2c": "-", "i2c_pines": "-", "uart": "-", "lora": "-", "spi": "-", "gps_coords": None}
     try:
         with serial.Serial(puerto, baudrate, timeout=timeout) as connection:
             time.sleep(2)
@@ -147,6 +147,8 @@ def leer_datos(puerto, baudrate=115200, timeout=2, on_evento=None):
                     continue
                 if line.startswith("BOARD:"):
                     datos["board"] = line.replace("BOARD:", "")
+                elif line.startswith("I2C_PINS:"):
+                    datos["i2c_pines"] = line.replace("I2C_PINS:", "", 1)
                 elif line.startswith("I2C:") or line.startswith("I2C"):
                     raw_i2c = line.replace("I2C:", "", 1)
                     datos["i2c"] = formatear_i2c(raw_i2c)
