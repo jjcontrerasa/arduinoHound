@@ -1,0 +1,130 @@
+{
+  "spi_devices": [
+    {
+      "cmd": "0x00",
+      "data": "0xE5",
+      "name": "ADXL345",
+      "description": "Acelerometro MEMS 3 ejes"
+    },
+    {
+      "cmd": "0xD0",
+      "data": "0x58",
+      "name": "BMP280",
+      "description": "Barometro y sensor de temperatura"
+    },
+    {
+      "cmd": "0xD0",
+      "data": "0x60",
+      "name": "BME280",
+      "description": "Barometro, temperatura y humedad"
+    },
+    {
+      "cmd": "0xD0",
+      "data": "0x61",
+      "name": "BME680",
+      "description": "Sensor ambiental multiparametro"
+    },
+    {
+      "cmd": "0x75",
+      "data": "0x68",
+      "name": "MPU6050",
+      "description": "IMU 6DOF acelerometro y giroscopio"
+    },
+    {
+      "cmd": "0x75",
+      "data": "0x70",
+      "name": "MPU6500",
+      "description": "IMU 6DOF de alto rendimiento"
+    },
+    {
+      "cmd": "0x75",
+      "data": "0x71",
+      "name": "MPU9250",
+      "description": "IMU 9DOF con magnetometro"
+    },
+    {
+      "cmd": "0x00",
+      "data": "0xEA",
+      "name": "ICM20948",
+      "description": "IMU 9DOF moderna"
+    },
+    {
+      "cmd": "0x00",
+      "data": "0x12",
+      "name": "ICM20602",
+      "description": "IMU 6DOF alta velocidad"
+    },
+    {
+      "cmd": "0x0F",
+      "data": "0x33",
+      "name": "LIS3DH",
+      "description": "Acelerometro 3 ejes bajo consumo"
+    },
+    {
+      "cmd": "0x0F",
+      "data": "0x69",
+      "name": "LSM6DS3",
+      "description": "IMU 6DOF"
+    },
+    {
+      "cmd": "0x0F",
+      "data": "0xBD",
+      "name": "LPS25H",
+      "description": "Barometro de precision"
+    },
+    {
+      "cmd": "0x0F",
+      "data": "0xB1",
+      "name": "LPS22HB",
+      "description": "Barometro alta resolucion"
+    },
+    {
+      "cmd": "0x00",
+      "data": "0x32",
+      "name": "H3LIS331DL",
+      "description": "Acelerometro High-G para coheteria"
+    },
+    {
+      "cmd": "0x42",
+      "data": "0x12",
+      "name": "SX1276",
+      "description": "Transceptor LoRa largo alcance"
+    },
+    {
+      "cmd": "0x42",
+      "data": "0x12",
+      "name": "SX1278",
+      "description": "Transceptor LoRa 433MHz"
+    },
+    {
+      "cmd": "0x42",
+      "data": "0x22",
+      "name": "SX1262",
+      "description": "Transceptor LoRa nueva generacion"
+    },
+    {
+      "cmd": "0x9F",
+      "data": "EF4016",
+      "name": "W25Q32",
+      "description": "Memoria Flash SPI 32Mbit"
+    },
+    {
+      "cmd": "0x9F",
+      "data": "EF4017",
+      "name": "W25Q64",
+      "description": "Memoria Flash SPI 64Mbit"
+    },
+    {
+      "cmd": "0x9F",
+      "data": "EF4018",
+      "name": "W25Q128",
+      "description": "Memoria Flash SPI 128Mbit"
+    },
+    {
+      "cmd": "CMD0",
+      "data": "0x01",
+      "name": "SD_CARD",
+      "description": "Tarjeta microSD"
+    }
+  ]
+}

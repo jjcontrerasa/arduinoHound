@@ -8,12 +8,91 @@ from datetime import datetime
 from tkinter import filedialog, ttk
 from .deteccion_puertos import obtener_puertos, parsear_puertos
 from .estado_ui import BarCarga, IndicadorEstado
-from .persistencia import cargar_boards, cargar_i2c, cargar_placas
+from .persistencia import cargar_boards, cargar_i2c, cargar_json, cargar_placas
 from .rastreo_serial import leer_datos
 from .rutas import configurar_ventana, resource_path, user_data_path
 
 COLOR_TITULO = "OliveDrab2"
 COLOR_OK = "green"
+
+
+def _normalizar_valor_spi(valor):
+    texto = str(valor or "").strip().upper()
+    if texto.startswith("0X"):
+        texto = texto[2:]
+    try:
+        return format(int(texto, 16), "X")
+    except ValueError:
+        return texto
+
+
+def _buscar_descripcion_spi(nombre, comando, data, catalogo):
+    nombre_normalizado = re.sub(r"[^A-Z0-9]", "", str(nombre).upper())
+    if nombre_normalizado == "TARJETASD":
+        nombre_normalizado = "SDCARD"
+
+    comando_normalizado = _normalizar_valor_spi(comando)
+    comandos_equivalentes = {comando_normalizado}
+    if comando_normalizado and not comando_normalizado.startswith("CMD"):
+        try:
+            comandos_equivalentes.add(format(int(comando_normalizado, 16) & 0x7F, "X"))
+        except ValueError:
+            pass
+
+    candidatos = [
+        dispositivo for dispositivo in catalogo
+        if _normalizar_valor_spi(dispositivo.get("cmd")) in comandos_equivalentes
+    ]
+
+    if candidatos:
+        data_normalizada = _normalizar_valor_spi(data)
+        coincidencias_data = [
+            dispositivo for dispositivo in candidatos
+            if _normalizar_valor_spi(dispositivo.get("data")) == data_normalizada
+        ]
+        if coincidencias_data:
+            candidatos = coincidencias_data
+
+        if len(candidatos) == 1:
+            return candidatos[0].get("description", "-")
+
+        for dispositivo in candidatos:
+            nombre_catalogo = re.sub(
+                r"[^A-Z0-9]", "", str(dispositivo.get("name", "")).upper()
+            )
+            if nombre_normalizado == nombre_catalogo or nombre_normalizado.endswith(nombre_catalogo):
+                return dispositivo.get("description", "-")
+
+        return candidatos[0].get("description", "-")
+
+    for dispositivo in catalogo:
+        nombre_catalogo = re.sub(
+            r"[^A-Z0-9]", "", str(dispositivo.get("name", "")).upper()
+        )
+        if nombre_normalizado == nombre_catalogo or nombre_normalizado.endswith(nombre_catalogo):
+            return dispositivo.get("description", "-")
+
+    return "-"
+
+
+def _parsear_dispositivo_uart(linea):
+    partes = str(linea).strip().split(";")
+    if not partes or not partes[0].startswith("UART_DEV:"):
+        return None
+
+    nombre = partes[0].partition(":")[2].strip()
+    if not nombre or nombre.upper() in {"UNKNOWN", "NONE", "-"}:
+        nombre = "Desconocido"
+
+    campos = {}
+    for parte in partes[1:]:
+        clave, separador, valor = parte.partition("=")
+        if separador:
+            campos[clave.strip().upper()] = valor.strip()
+
+    rx = campos.get("RX", "-") or "-"
+    tx = campos.get("TX", "-") or "-"
+    return rx, tx, nombre
 
 
 def liberar_puertos():
@@ -105,6 +184,10 @@ def crear_panel(root):
     rastreo_hilo = [None]
     version_escaneo_puertos = [0]
     catalogo_i2c = cargar_i2c()
+    catalogo_spi_json = cargar_json(
+        resource_path("data", "dispositivos_spi.json"), {"spi_devices": []}
+    )
+    catalogo_spi = catalogo_spi_json.get("spi_devices", [])
     reportes_file = user_data_path("reportes.json")
 
     outer = tk.Frame(root, bg="black",
@@ -155,17 +238,29 @@ def crear_panel(root):
                            highlightthickness=1)
     frame_lista.pack(fill="both", expand=True)
 
-    frame_i2c = tk.Frame(main, bg="black")
-    frame_i2c.pack(fill="x", padx=5, pady=(5, 0))
+    frame_resultados = tk.Frame(main, bg="black")
+    frame_resultados.pack(fill="both", expand=True, padx=5, pady=(5, 0))
+    frame_resultados.grid_columnconfigure(0, weight=1, uniform="resultados")
+    frame_resultados.grid_columnconfigure(1, weight=1, uniform="resultados")
+    frame_resultados.grid_rowconfigure(0, weight=1)
 
-    tk.Label(frame_i2c, text="Dispositivos I2C detectados",
+    frame_tablas = tk.Frame(frame_resultados, bg="black")
+    frame_tablas.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+
+    frame_diagnostico = tk.Frame(frame_resultados, bg="black")
+    frame_diagnostico.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
+
+    frame_i2c = tk.Frame(frame_tablas, bg="black")
+    frame_i2c.pack(fill="x", pady=(0, 5))
+
+    tk.Label(frame_i2c, text="Dispositivos I2C",
              fg="white", bg="black", anchor="w").pack(fill="x")
 
     estilo_tabla = ttk.Style()
     estilo_tabla.configure(
         "ArduinoHound.Treeview",
         background="black",
-        foreground="white",
+        foreground="cyan",
         fieldbackground="black",
         rowheight=22,
     )
@@ -189,16 +284,68 @@ def crear_panel(root):
     tabla_i2c.heading("direccion", text="Dirección")
     tabla_i2c.heading("dispositivo", text="Dispositivo posible")
     tabla_i2c.heading("descripcion", text="Descripción")
-    tabla_i2c.column("direccion", width=65, minwidth=50, anchor="center", stretch=False)
-    tabla_i2c.column("dispositivo", width=120, minwidth=100, anchor="w", stretch=False)
-    tabla_i2c.column("descripcion", width=200, minwidth=180, anchor="w", stretch=False)
+    tabla_i2c.column("direccion", width=60, minwidth=45, anchor="center", stretch=False)
+    tabla_i2c.column("dispositivo", width=105, minwidth=80, anchor="w", stretch=False)
+    tabla_i2c.column("descripcion", width=180, minwidth=140, anchor="w", stretch=True)
     tabla_i2c.pack(side="left", fill="x", expand=True)
 
     tabla_scroll = ttk.Scrollbar(frame_i2c, orient="vertical", command=tabla_i2c.yview)
     tabla_scroll.pack(side="right", fill="y")
     tabla_i2c.configure(yscrollcommand=tabla_scroll.set)
 
-    salida = tk.Text(main, bg="black", fg="white", height=10)
+    frame_uart = tk.Frame(frame_tablas, bg="black")
+    frame_uart.pack(fill="x", pady=(0, 5))
+
+    tk.Label(frame_uart, text="Dispositivos UART",
+             fg="white", bg="black", anchor="w").pack(fill="x")
+
+    tabla_uart = ttk.Treeview(
+        frame_uart,
+        columns=("rx", "tx", "nombre"),
+        show="headings",
+        height=2,
+        style="ArduinoHound.Treeview",
+    )
+    tabla_uart.heading("rx", text="RX")
+    tabla_uart.heading("tx", text="TX")
+    tabla_uart.heading("nombre", text="Descripción")
+    tabla_uart.column("rx", width=75, minwidth=60, anchor="center", stretch=False)
+    tabla_uart.column("tx", width=75, minwidth=60, anchor="center", stretch=False)
+    tabla_uart.column("nombre", width=190, minwidth=130, anchor="w", stretch=True)
+    tabla_uart.pack(side="left", fill="x", expand=True)
+
+    tabla_uart_scroll = ttk.Scrollbar(frame_uart, orient="vertical", command=tabla_uart.yview)
+    tabla_uart_scroll.pack(side="right", fill="y")
+    tabla_uart.configure(yscrollcommand=tabla_uart_scroll.set)
+
+    frame_spi = tk.Frame(frame_tablas, bg="black")
+    frame_spi.pack(fill="x")
+
+    tk.Label(frame_spi, text="Dispositivos SPI",
+             fg="white", bg="black", anchor="w").pack(fill="x")
+
+    tabla_spi = ttk.Treeview(
+        frame_spi,
+        columns=("cs", "cmd", "data", "descripcion"),
+        show="headings",
+        height=2,
+        style="ArduinoHound.Treeview",
+    )
+    tabla_spi.heading("cs", text="CS (Chip Select)")
+    tabla_spi.heading("cmd", text="CMD")
+    tabla_spi.heading("data", text="Data")
+    tabla_spi.heading("descripcion", text="Descripción")
+    tabla_spi.column("cs", width=90, minwidth=75, anchor="center", stretch=False)
+    tabla_spi.column("cmd", width=60, minwidth=50, anchor="center", stretch=False)
+    tabla_spi.column("data", width=80, minwidth=65, anchor="center", stretch=False)
+    tabla_spi.column("descripcion", width=170, minwidth=120, anchor="w", stretch=True)
+    tabla_spi.pack(side="left", fill="x", expand=True)
+
+    tabla_spi_scroll = ttk.Scrollbar(frame_spi, orient="vertical", command=tabla_spi.yview)
+    tabla_spi_scroll.pack(side="right", fill="y")
+    tabla_spi.configure(yscrollcommand=tabla_spi_scroll.set)
+
+    salida = tk.Text(frame_diagnostico, bg="black", fg="white", height=10)
     salida.pack(fill="both", expand=True)
 
     salida.tag_config("ok", foreground=COLOR_OK)
@@ -208,7 +355,7 @@ def crear_panel(root):
         ventana.title("Generar reporte")
         configurar_ventana(ventana)
         ventana.configure(bg="black")
-        ventana.geometry("720x620")
+        ventana.geometry("1040x660")
         ventana.resizable(False, False)
         ventana.transient(root)
         ventana.grab_set()
@@ -237,40 +384,82 @@ def crear_panel(root):
             foreground=color_valor,
             font=fuente_valor,
         )
+        estilo_reporte.configure(
+            "Reporte.Treeview",
+            background="black",
+            foreground=color_valor,
+            fieldbackground="black",
+            borderwidth=0,
+            relief="flat",
+            rowheight=24,
+        )
+        estilo_reporte.configure(
+            "Reporte.Treeview.Heading",
+            background="black",
+            foreground="white",
+            borderwidth=0,
+            relief="flat",
+        )
+        estilo_reporte.map(
+            "Reporte.Treeview.Heading",
+            background=[("active", "black"), ("pressed", "black")],
+        )
         ahora = datetime.now()
 
         frame_fecha_hora = tk.Frame(ventana, bg="black")
         frame_fecha_hora.pack(fill="x", padx=20)
+        for columna, peso in enumerate((1, 2, 1)):
+            frame_fecha_hora.grid_columnconfigure(columna, weight=peso)
         fecha_frame = tk.Frame(frame_fecha_hora, bg="black")
-        fecha_frame.pack(side="left")
+        fecha_frame.grid(row=0, column=0, sticky="w")
         tk.Label(fecha_frame, text="Fecha:", fg="white", bg="black", font=fuente_clave).pack(side="left")
         tk.Label(fecha_frame, text=f"{ahora:%d/%m/%Y}", fg=color_valor, bg="black", font=fuente_valor).pack(side="left", padx=(5, 0))
+        etiqueta_total = tk.Label(
+            frame_fecha_hora,
+            text="0 dispositivos encontrados.",
+            fg=color_valor,
+            bg="black",
+            font=fuente_valor,
+            anchor="center",
+        )
+        etiqueta_total.grid(row=0, column=1, sticky="ew")
         hora_frame = tk.Frame(frame_fecha_hora, bg="black")
-        hora_frame.pack(side="right")
+        hora_frame.grid(row=0, column=2, sticky="e")
         tk.Label(hora_frame, text="Hora:", fg="white", bg="black", font=fuente_clave).pack(side="left")
         tk.Label(hora_frame, text=f"{ahora:%H:%M:%S}", fg=color_valor, bg="black", font=fuente_valor).pack(side="left", padx=(5, 0))
 
         tk.Frame(ventana, bg="white", height=1).pack(fill="x", padx=20, pady=(10, 12))
 
-        frame_datos = tk.Frame(ventana, bg="black", width=300)
-        frame_datos.pack(anchor="center", padx=20)
-        frame_datos.grid_columnconfigure(0, minsize=150, weight=0)
-        frame_datos.grid_columnconfigure(1, minsize=150, weight=0)
+        frame_datos = tk.Frame(ventana, bg="black")
+        frame_datos.pack(fill="x", padx=20)
+        frame_datos.grid_columnconfigure(0, weight=1, uniform="datos_reporte")
+        frame_datos.grid_columnconfigure(1, weight=1, uniform="datos_reporte")
 
-        def agregar_clave(fila, texto):
+        frame_datos_izquierda = tk.Frame(frame_datos, bg="black")
+        frame_datos_izquierda.grid(row=0, column=0, sticky="new", padx=(0, 24))
+        frame_datos_izquierda.grid_columnconfigure(0, minsize=210, weight=0)
+        frame_datos_izquierda.grid_columnconfigure(1, weight=1)
+
+        frame_datos_derecha = tk.Frame(frame_datos, bg="black")
+        frame_datos_derecha.grid(row=0, column=1, sticky="new", padx=(24, 0))
+        frame_datos_derecha.grid_columnconfigure(0, minsize=55, weight=0)
+        frame_datos_derecha.grid_columnconfigure(1, weight=1)
+
+        def agregar_clave(marco, fila, texto):
             tk.Label(
-                frame_datos,
+            marco,
                 text=texto,
                 fg="white",
                 bg="black",
                 font=fuente_clave,
                 anchor="nw",
+                wraplength=205,
             ).grid(row=fila, column=0, sticky="nw", pady=4)
 
-        agregar_clave(0, "Nombre del equipo:")
+        agregar_clave(frame_datos_izquierda, 0, "Nombre del equipo:")
         equipo_var = tk.StringVar()
         tk.Entry(
-            frame_datos,
+            frame_datos_izquierda,
             textvariable=equipo_var,
             bg="#202020",
             fg=color_valor,
@@ -279,9 +468,9 @@ def crear_panel(root):
             width=18,
         ).grid(row=0, column=1, sticky="ew", pady=4)
 
-        agregar_clave(1, "Placa:")
+        agregar_clave(frame_datos_izquierda, 1, "Placa:")
         placa_label = tk.Label(
-            frame_datos,
+            frame_datos_izquierda,
             text=reporte_actual[0].get("board", "No disponible"),
             fg=color_valor,
             bg="black",
@@ -291,31 +480,36 @@ def crear_panel(root):
         )
         placa_label.grid(row=1, column=1, sticky="w", pady=4)
 
-        agregar_clave(2, "FQBN:")
+        agregar_clave(
+            frame_datos_izquierda,
+            2,
+            "FQBN (Nombre de Placa Totalmente Calificado):",
+        )
         fqbn_label = tk.Label(
-            frame_datos,
+            frame_datos_izquierda,
             text=reporte_actual[0].get("fqbn", "No disponible"),
             fg=color_valor,
             bg="black",
             font=fuente_valor,
             anchor="w",
-            wraplength=150,
+            wraplength=260,
         )
         fqbn_label.grid(row=2, column=1, sticky="w", pady=4)
 
         etiquetas_resumen = {}
-        filas_protocolo = {"I2C": 3, "UART": 4, "SPI": 5}
+        dispositivos_modificados = {"I2C": False, "UART": False, "SPI": False}
+        filas_protocolo = {"I2C": 0, "UART": 1, "SPI": 2}
         for protocolo, fila in filas_protocolo.items():
-            agregar_clave(fila, f"{protocolo}:")
+            agregar_clave(frame_datos_derecha, fila, f"{protocolo}:")
             etiquetas_resumen[protocolo] = tk.Label(
-                frame_datos,
+                frame_datos_derecha,
                 text="Ninguno",
                 fg="VioletRed1",
                 bg="black",
                 font=fuente_valor,
                 anchor="nw",
                 justify="left",
-                wraplength=150,
+                wraplength=360,
             )
             etiquetas_resumen[protocolo].grid(row=fila, column=1, sticky="ew", pady=4)
 
@@ -326,14 +520,21 @@ def crear_panel(root):
             for dispositivo in registro.get("i2c", []):
                 direccion = dispositivo.get("direccion", "")
                 seleccion = seleccionados.get(direccion, {})
-                descripcion = seleccion.get("descripcion", "") if isinstance(seleccion, dict) else seleccion
-                descripcion = str(descripcion or dispositivo.get("descripcion", "No identificado")).strip()
+                nombre_dispositivo = (
+                    seleccion.get("dispositivo", "")
+                    if isinstance(seleccion, dict)
+                    else str(seleccion or "")
+                )
+                if not nombre_dispositivo:
+                    opciones = registro.get("i2c_opciones", {}).get(direccion, [])
+                    if opciones:
+                        nombre_dispositivo = opciones[0].get("dispositivo", "")
                 dispositivos_i2c.append(
-                    descripcion if descripcion not in {"", "-", "ninguno"} else "No identificado"
+                    str(nombre_dispositivo or "No identificado").strip()
                 )
 
             uart = [
-                modulo.strip()
+                modulo.split("(", 1)[0].strip()
                 for modulo in str(registro.get("uart", "")).split(" | ")
                 if modulo.strip().lower() not in {"", "-", "none", "ninguno"}
             ]
@@ -346,15 +547,29 @@ def crear_panel(root):
             for protocolo, dispositivos in (("I2C", dispositivos_i2c), ("UART", uart), ("SPI", spi)):
                 etiqueta = etiquetas_resumen[protocolo]
                 etiqueta.config(
-                    text="; ".join(dispositivos) if dispositivos else "Ninguno",
-                    fg=color_valor if dispositivos else "VioletRed1",
+                    text=", ".join(dispositivos) if dispositivos else "Ninguno",
+                    fg=(
+                        "greenyellow"
+                        if dispositivos_modificados[protocolo]
+                        else color_valor if dispositivos else "VioletRed1"
+                    ),
                 )
+            total = len(dispositivos_i2c) + len(uart) + len(spi)
+            etiqueta_total.config(text=f"{total} dispositivos encontrados.")
 
         marco_tabla_i2c = tk.Frame(ventana, bg="black")
-        marco_tabla_i2c.pack(fill="both", expand=True, padx=20, pady=(12, 0))
-        tabla_i2c = tk.Frame(marco_tabla_i2c, bg="black", width=330)
-        tabla_i2c.pack(anchor="center", fill="y", expand=True)
-        tabla_i2c.pack_propagate(False)
+        marco_tabla_i2c.pack(fill="x", expand=False, padx=0, pady=(12, 0))
+        for columna in range(3):
+            marco_tabla_i2c.grid_columnconfigure(columna, weight=1, uniform="reporte_protocolos")
+
+        tabla_i2c = tk.Frame(
+            marco_tabla_i2c,
+            bg="black",
+            highlightbackground="white",
+            highlightcolor="white",
+            highlightthickness=1,
+        )
+        tabla_i2c.grid(row=0, column=0, sticky="new", padx=0)
         tabla_i2c.grid_columnconfigure(0, minsize=150, weight=0)
         tabla_i2c.grid_columnconfigure(1, minsize=150, weight=0)
 
@@ -365,7 +580,15 @@ def crear_panel(root):
             bg="black",
             font=fuente_valor,
             anchor="w",
-        ).grid(row=0, column=0, sticky="ew", padx=(0, 12), pady=(0, 4))
+        ).grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+        tk.Label(
+            tabla_i2c,
+            text="Dirección",
+            fg="white",
+            bg="black",
+            font=fuente_valor,
+            anchor="w",
+        ).grid(row=1, column=0, sticky="ew", padx=(0, 12), pady=(0, 4))
         tk.Label(
             tabla_i2c,
             text="Dispositivo",
@@ -373,11 +596,12 @@ def crear_panel(root):
             bg="black",
             font=fuente_valor,
             anchor="w",
-        ).grid(row=0, column=1, sticky="ew", pady=(0, 4))
+        ).grid(row=1, column=1, sticky="ew", pady=(0, 4))
 
-        cuerpo_tabla = tk.Frame(tabla_i2c, bg="black")
-        cuerpo_tabla.grid(row=1, column=0, columnspan=2, sticky="nsew")
-        tabla_i2c.grid_rowconfigure(1, weight=1)
+        cuerpo_tabla = tk.Frame(tabla_i2c, bg="black", height=34)
+        cuerpo_tabla.grid(row=2, column=0, columnspan=2, sticky="nsew")
+        cuerpo_tabla.grid_propagate(False)
+        tabla_i2c.grid_rowconfigure(2, weight=1)
         lienzo_i2c = tk.Canvas(cuerpo_tabla, bg="black", highlightthickness=0)
         lienzo_i2c.pack(side="left", fill="both", expand=True)
         filas_i2c = tk.Frame(lienzo_i2c, bg="black")
@@ -394,6 +618,7 @@ def crear_panel(root):
         )
 
         etiqueta_scroll_i2c = f"ScrollI2C{ventana}"
+        lienzos_por_widget = {}
 
         def desplazar_tabla_i2c(event):
             if getattr(event, "num", None) == 4:
@@ -402,17 +627,233 @@ def crear_panel(root):
                 desplazamiento = 1
             else:
                 desplazamiento = -1 if event.delta > 0 else 1
-            lienzo_i2c.yview_scroll(desplazamiento, "units")
+            lienzo = lienzos_por_widget.get(event.widget, lienzo_i2c)
+            lienzo.yview_scroll(desplazamiento, "units")
             return "break"
 
         ventana.bind_class(etiqueta_scroll_i2c, "<MouseWheel>", desplazar_tabla_i2c)
         ventana.bind_class(etiqueta_scroll_i2c, "<Button-4>", desplazar_tabla_i2c)
         ventana.bind_class(etiqueta_scroll_i2c, "<Button-5>", desplazar_tabla_i2c)
 
-        def agregar_etiqueta_scroll(widget):
+        def agregar_etiqueta_scroll(widget, lienzo):
+            lienzos_por_widget[widget] = lienzo
             widget.bindtags((etiqueta_scroll_i2c, *widget.bindtags()))
             for hijo in widget.winfo_children():
-                agregar_etiqueta_scroll(hijo)
+                agregar_etiqueta_scroll(hijo, lienzo)
+
+        def crear_tabla_protocolo(columna, titulo, columnas):
+            marco = tk.Frame(
+                marco_tabla_i2c,
+                bg="black",
+                highlightbackground="white",
+                highlightcolor="white",
+                highlightthickness=1,
+            )
+            marco.grid(row=0, column=columna, sticky="new", padx=0)
+            tk.Label(
+                marco,
+                text=titulo,
+                fg="white",
+                bg="black",
+                font=fuente_valor,
+                anchor="w",
+            ).grid(row=0, column=0, columnspan=len(columnas), sticky="ew", pady=(0, 4))
+
+            encabezados = tk.Frame(marco, bg="black")
+            encabezados.grid(row=1, column=0, sticky="ew")
+            filas = tk.Frame(marco, bg="black", height=34)
+            filas.grid(row=2, column=0, sticky="ew")
+            filas.grid_propagate(False)
+            lienzo = tk.Canvas(filas, bg="black", highlightthickness=0)
+            lienzo.pack(fill="both", expand=True)
+            filas_datos = tk.Frame(lienzo, bg="black")
+            ventana_filas = lienzo.create_window((0, 0), window=filas_datos, anchor="nw")
+
+            for indice, (identificador, encabezado, ancho) in enumerate(columnas):
+                encabezados.grid_columnconfigure(indice, minsize=ancho, weight=1)
+                filas_datos.grid_columnconfigure(indice, minsize=ancho, weight=1)
+                tk.Label(
+                    encabezados,
+                    text=encabezado,
+                    fg="white",
+                    bg="black",
+                    font=fuente_valor,
+                    anchor="w",
+                ).grid(row=0, column=indice, sticky="ew", padx=(0, 8), pady=(0, 4))
+
+            filas_datos.bind(
+                "<Configure>",
+                lambda _event, lienzo=lienzo: lienzo.configure(
+                    scrollregion=lienzo.bbox("all")
+                ),
+            )
+            lienzo.bind(
+                "<Configure>",
+                lambda event, lienzo=lienzo, ventana_filas=ventana_filas:
+                    lienzo.itemconfigure(ventana_filas, width=event.width),
+            )
+            agregar_etiqueta_scroll(filas_datos, lienzo)
+            return lienzo, filas_datos, columnas
+
+        lienzo_uart, filas_uart, columnas_uart = crear_tabla_protocolo(
+            1,
+            "Direcciones UART",
+            (("rx", "RX", 55), ("tx", "TX", 55), ("set", "SET", 55), ("nombre", "Dispositivo", 150)),
+        )
+        lienzo_spi, filas_spi, columnas_spi = crear_tabla_protocolo(
+            2,
+            "Direcciones SPI",
+            (("cs", "CS", 55), ("nombre", "Dispositivo", 105), ("cmd", "CMD", 55), ("data", "Data", 75)),
+        )
+
+        def insertar_fila_tabla(
+            filas, columnas, numero, valores, columna_editable=None, al_editar=None
+        ):
+            for indice, valor in enumerate(valores):
+                if indice == columna_editable:
+                    campo = tk.Entry(
+                        filas,
+                        bg="black",
+                        fg=color_valor,
+                        insertbackground=color_valor,
+                        font=fuente_valor,
+                        relief="flat",
+                        highlightthickness=0,
+                    )
+                    campo.insert(0, str(valor))
+                    campo.grid(
+                        row=numero,
+                        column=indice,
+                        sticky="ew",
+                        padx=(0, 8),
+                        pady=3,
+                    )
+                    if al_editar is not None:
+                        campo.bind(
+                            "<FocusOut>",
+                            lambda _event, campo=campo: al_editar(campo),
+                        )
+                else:
+                    tk.Label(
+                        filas,
+                        text=valor,
+                        fg=color_valor,
+                        bg="black",
+                        font=fuente_valor,
+                        anchor="w",
+                    ).grid(row=numero, column=indice, sticky="ew", padx=(0, 8), pady=3)
+
+        def llenar_tablas_uart_spi_reporte():
+            for widget in filas_uart.winfo_children():
+                widget.destroy()
+            modulos_uart = [
+                modulo.strip()
+                for modulo in str(reporte_actual[0].get("uart", "")).split(" | ")
+                if modulo.strip().lower() not in {"", "-", "none", "ninguno"}
+            ]
+            for fila, modulo in enumerate(modulos_uart):
+                coincidencia = re.match(
+                    r"^(.*?)\s*\(RX=([^,]+),\s*TX=([^,)]+)", modulo
+                )
+                if coincidencia:
+                    nombre, rx, tx = (parte.strip() for parte in coincidencia.groups())
+                else:
+                    nombre, rx, tx = modulo, "-", "-"
+                coincidencia_set = re.search(r"\bSET=([^,\)\s]+)", modulo)
+                set_pin = coincidencia_set.group(1).strip() if coincidencia_set else "-"
+
+                def actualizar_nombre_uart(
+                    campo,
+                    fila=fila,
+                    modulo_original=modulo,
+                    nombre_original=nombre,
+                ):
+                    nombre_nuevo = campo.get().strip() or nombre_original
+                    campo.delete(0, tk.END)
+                    campo.insert(0, nombre_nuevo)
+                    modulos_actuales = str(reporte_actual[0].get("uart", "")).split(" | ")
+                    if fila >= len(modulos_actuales):
+                        return
+                    sufijo = modulo_original[len(nombre_original):]
+                    modulos_actuales[fila] = nombre_nuevo + sufijo
+                    reporte_actual[0]["uart"] = " | ".join(modulos_actuales)
+                    if nombre_nuevo != nombre_original:
+                        dispositivos_modificados["UART"] = True
+                        campo.configure(fg="greenyellow")
+                    else:
+                        campo.configure(fg=color_valor)
+                    actualizar_resumen_reporte()
+
+                insertar_fila_tabla(
+                    filas_uart,
+                    columnas_uart,
+                    fila,
+                    (rx, tx, set_pin, nombre or "Desconocido"),
+                    columna_editable=3,
+                    al_editar=actualizar_nombre_uart,
+                )
+            if not modulos_uart:
+                insertar_fila_tabla(filas_uart, columnas_uart, 0, ("-", "-", "-", "Ninguno"))
+            agregar_etiqueta_scroll(filas_uart, lienzo_uart)
+
+            for widget in filas_spi.winfo_children():
+                widget.destroy()
+            modulos_spi = []
+            for modulo in str(reporte_actual[0].get("spi", "")).split(","):
+                partes = modulo.strip().split(";")
+                nombre = partes[0].strip()
+                if nombre.lower() in {"", "-", "none", "ninguno"}:
+                    continue
+                campos = {}
+                for parte in partes[1:]:
+                    clave, separador, valor = parte.partition("=")
+                    if separador:
+                        campos[clave.strip().upper()] = valor.strip()
+                modulos_spi.append({
+                    "original": modulo.strip(),
+                    "name": nombre,
+                    "values": (
+                        campos.get("CS", "-"),
+                        nombre,
+                        campos.get("CMD", "-"),
+                        campos.get("DATA", "-"),
+                    ),
+                })
+            if modulos_spi:
+                for fila, modulo in enumerate(modulos_spi):
+                    def actualizar_nombre_spi(
+                        campo,
+                        fila=fila,
+                        original=modulo["original"],
+                        nombre_original=modulo["name"],
+                    ):
+                        nombre_nuevo = campo.get().strip() or nombre_original
+                        campo.delete(0, tk.END)
+                        campo.insert(0, nombre_nuevo)
+                        modulos_actuales = str(reporte_actual[0].get("spi", "")).split(",")
+                        if fila >= len(modulos_actuales):
+                            return
+                        sufijo = original[len(nombre_original):]
+                        modulos_actuales[fila] = nombre_nuevo + sufijo
+                        reporte_actual[0]["spi"] = ",".join(modulos_actuales)
+                        if nombre_nuevo != nombre_original:
+                            dispositivos_modificados["SPI"] = True
+                            campo.configure(fg="greenyellow")
+                        else:
+                            campo.configure(fg=color_valor)
+                        actualizar_resumen_reporte()
+
+                    insertar_fila_tabla(
+                        filas_spi,
+                        columnas_spi,
+                        fila,
+                        modulo["values"],
+                        columna_editable=1,
+                        al_editar=actualizar_nombre_spi,
+                    )
+            else:
+                insertar_fila_tabla(filas_spi, columnas_spi, 0, ("-", "Ninguno", "-", "-"))
+            agregar_etiqueta_scroll(filas_spi, lienzo_spi)
 
         def llenar_i2c_reporte():
             for widget in filas_i2c.winfo_children():
@@ -421,6 +862,7 @@ def crear_panel(root):
             registros = reporte_actual[0].get("i2c", [])
             seleccionados = reporte_actual[0].get("i2c_seleccion", {})
             actualizar_resumen_reporte()
+            llenar_tablas_uart_spi_reporte()
 
             if not registros:
                 tk.Label(
@@ -431,7 +873,7 @@ def crear_panel(root):
                     font=fuente_valor,
                     anchor="w",
                 ).grid(row=0, column=0, columnspan=2, sticky="ew", pady=4)
-                agregar_etiqueta_scroll(filas_i2c)
+                agregar_etiqueta_scroll(filas_i2c, lienzo_i2c)
                 return
 
             direcciones_vistas = set()
@@ -464,7 +906,7 @@ def crear_panel(root):
                 selector = ttk.Combobox(
                     selector_frame,
                     values=nombres,
-                    state="readonly",
+                    state="normal",
                     width=48,
                     font=fuente_valor,
                     style="Reporte.TCombobox",
@@ -476,59 +918,139 @@ def crear_panel(root):
                     if isinstance(seleccion_guardada, dict)
                     else str(seleccion_guardada)
                 )
-                if nombres:
-                    selector.set(dispositivo_guardado if dispositivo_guardado in nombres else nombres[0])
-                else:
-                    selector.set("No identificado")
-                def actualizar_dispositivo(_event=None, selector=selector, direccion=direccion, opciones=opciones):
-                    dispositivo = selector.get()
+                dispositivo_inicial = (
+                    dispositivo_guardado
+                    or (nombres[0] if nombres else "No identificado")
+                )
+                selector.set(dispositivo_inicial)
+
+                def actualizar_dispositivo(
+                    _event=None,
+                    selector=selector,
+                    direccion=direccion,
+                    opciones=opciones,
+                    dispositivo_inicial=dispositivo_inicial,
+                ):
+                    dispositivo = selector.get().strip()
+                    if not dispositivo:
+                        dispositivo = dispositivo_inicial
+                        selector.set(dispositivo)
                     opcion = next(
                         (item for item in opciones if str(item.get("dispositivo", "")) == dispositivo),
                         None,
                     )
-                    if opcion:
-                        reporte_actual[0].setdefault("i2c_seleccion", {})[direccion] = {
-                            "descripcion": opcion.get("descripcion", "-"),
-                            "dispositivo": dispositivo,
-                        }
-                        actualizar_resumen_reporte()
-                    elif not opciones:
-                        reporte_actual[0].setdefault("i2c_seleccion", {}).pop(direccion, None)
-                        actualizar_resumen_reporte()
-
-                if nombres:
-                    actualizar_dispositivo()
+                    reporte_actual[0].setdefault("i2c_seleccion", {})[direccion] = {
+                        "descripcion": opcion.get("descripcion", "Personalizado") if opcion else "Personalizado",
+                        "dispositivo": dispositivo,
+                    }
+                    if dispositivo != dispositivo_inicial:
+                        dispositivos_modificados["I2C"] = True
+                        selector.configure(foreground="greenyellow")
+                    else:
+                        selector.configure(foreground=color_valor)
+                    actualizar_resumen_reporte()
 
                 selector.bind("<<ComboboxSelected>>", actualizar_dispositivo)
+                selector.bind("<FocusOut>", actualizar_dispositivo)
+                agregar_etiqueta_scroll(selector, lienzo_i2c)
+                actualizar_dispositivo()
                 fila_numero += 1
 
-            agregar_etiqueta_scroll(filas_i2c)
+            agregar_etiqueta_scroll(filas_i2c, lienzo_i2c)
 
         llenar_i2c_reporte()
 
         frame_reporte = tk.Frame(ventana, bg="black")
         frame_reporte.pack(padx=18, pady=(0, 18))
 
-        def descargar_registros():
-            ruta = filedialog.askopenfilename(
-                title="Descargar registros",
-                filetypes=[("Reportes JSON", "*.json"), ("Todos los archivos", "*.*")],
-                parent=ventana,
-            )
-            if not ruta:
-                return
+        def ver_registros():
             try:
-                with open(ruta, "r", encoding="utf-8") as archivo:
+                with reportes_file.open("r", encoding="utf-8") as archivo:
                     registros = json.load(archivo)
-                if isinstance(registros, list) and registros:
-                    registros = registros[-1]
-                equipo_var.set(registros.get("nombre_equipo", ""))
-                placa_label.config(text=registros.get("board", "No disponible"))
-                fqbn_label.config(text=registros.get("fqbn", "No disponible"))
-                reporte_actual[0].update(registros)
-                llenar_i2c_reporte()
-            except (OSError, json.JSONDecodeError, AttributeError):
+            except (OSError, json.JSONDecodeError):
+                messagebox.showinfo(
+                    "Ver registros",
+                    "No hay reportes guardados.",
+                    parent=ventana,
+                )
                 return
+
+            if isinstance(registros, dict):
+                registros = [registros]
+            if not isinstance(registros, list) or not registros:
+                messagebox.showinfo(
+                    "Ver registros",
+                    "No hay reportes guardados.",
+                    parent=ventana,
+                )
+                return
+
+            ventana_registros = tk.Toplevel(ventana)
+            ventana_registros.title("Registros guardados")
+            configurar_ventana(ventana_registros)
+            ventana_registros.after(10, configurar_ventana, ventana_registros)
+            ventana_registros.configure(bg="black")
+            ventana_registros.geometry("760x480")
+            ventana_registros.resizable(False, False)
+            ventana_registros.transient(ventana)
+
+            lista_registros = ttk.Treeview(
+                ventana_registros,
+                columns=("fecha", "hora", "equipo", "placa"),
+                show="headings",
+                height=8,
+                style="Reporte.Treeview",
+            )
+            for clave, encabezado, ancho in (
+                ("fecha", "Fecha", 90),
+                ("hora", "Hora", 80),
+                ("equipo", "Equipo", 210),
+                ("placa", "Placa", 280),
+            ):
+                lista_registros.heading(clave, text=encabezado)
+                lista_registros.column(clave, width=ancho, anchor="w", stretch=True)
+            lista_registros.pack(fill="x", padx=16, pady=(16, 8))
+
+            detalles_registro = tk.Text(
+                ventana_registros,
+                bg="black",
+                fg=color_valor,
+                height=8,
+                wrap="word",
+                relief="flat",
+                highlightthickness=0,
+            )
+            detalles_registro.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+            registros_por_id = {}
+            for indice, registro in enumerate(registros):
+                if not isinstance(registro, dict):
+                    continue
+                identificador = str(indice)
+                registros_por_id[identificador] = registro
+                lista_registros.insert(
+                    "",
+                    "end",
+                    iid=identificador,
+                    values=(
+                        registro.get("fecha", "-"),
+                        registro.get("hora", "-"),
+                        registro.get("nombre_equipo", "-"),
+                        registro.get("board", "-"),
+                    ),
+                )
+
+            def mostrar_detalle_registro(_event=None):
+                seleccion = lista_registros.selection()
+                if not seleccion:
+                    return
+                registro = registros_por_id.get(seleccion[0], {})
+                detalles_registro.delete("1.0", tk.END)
+                detalles_registro.insert(
+                    tk.END, json.dumps(registro, ensure_ascii=False, indent=2)
+                )
+
+            lista_registros.bind("<<TreeviewSelect>>", mostrar_detalle_registro)
+            ventana_registros.grab_set()
 
         def guardar_reporte():
             registro = dict(reporte_actual[0])
@@ -547,17 +1069,22 @@ def crear_panel(root):
             except (OSError, json.JSONDecodeError):
                 return
             boton_guardar.config(state="disabled")
+            messagebox.showinfo(
+                "Generar reporte",
+                "El reporte se guardó correctamente.",
+                parent=ventana,
+            )
 
         tk.Button(
             frame_reporte,
-            text="⬇ Descargar registros",
-            command=descargar_registros,
+            text="Ver registros",
+            command=ver_registros,
             bg="black", fg="white", highlightbackground="OliveDrab", highlightthickness=1,
         ).pack(side="left", padx=5)
 
         boton_guardar = tk.Button(
             frame_reporte,
-            text="💾 Guardar reporte",
+            text="Generar reporte",
             command=guardar_reporte,
             bg="black",
             fg="white",
@@ -566,15 +1093,18 @@ def crear_panel(root):
         )
         boton_guardar.pack(side="left", padx=5)
 
-        tk.Button(
+        boton_salir = tk.Button(
             frame_reporte,
-            text="🚪 Salir sin guardar",
+            text="Salir sin guardar",
             command=ventana.destroy,
             bg="black",
             fg="white",
             highlightbackground="OliveDrab",
             highlightthickness=1,
-        ).pack(side="left", padx=5)
+        )
+        boton_salir.pack(side="left", padx=5)
+        boton_salir.configure(default="active")
+        ventana.after_idle(boton_salir.focus_set)
 
     boton_reporte = tk.Button(
         frame_btn,
@@ -616,7 +1146,7 @@ def crear_panel(root):
         if not direcciones:
             tabla_i2c.insert("", "end", values=("-", "Ninguno", "No se detectaron dispositivos I2C"))
 
-    frame_debug = tk.Frame(main, bg="black", highlightbackground="white", highlightthickness=1)
+    frame_debug = tk.Frame(frame_diagnostico, bg="black", highlightbackground="white", highlightthickness=1)
     frame_debug.pack(fill="both", expand=True, pady=(5, 0))
 
     tk.Label(frame_debug, text="Diagnóstico en tiempo real", fg="#7fe9ff", bg="black", font=("Arial", 10, "bold")).pack(anchor="w", padx=5, pady=(5, 0))
@@ -624,6 +1154,61 @@ def crear_panel(root):
     debug_output.pack(fill="both", expand=True, padx=5, pady=5)
 
     debug_output.tag_config("debug", foreground="#7fe9ff")
+
+    def actualizar_tabla_uart(linea):
+        dispositivo = _parsear_dispositivo_uart(linea)
+        if dispositivo is None:
+            return
+        rx, tx, nombre = dispositivo
+        for item in tabla_uart.get_children():
+            valores = tabla_uart.item(item, "values")
+            if valores[0] == rx and valores[1] == tx:
+                tabla_uart.item(item, values=(rx, tx, nombre))
+                return
+
+        tabla_uart.insert("", "end", values=(rx, tx, nombre))
+
+    def actualizar_tabla_spi(linea):
+        partes = str(linea).strip().split(";")
+        if not partes or not partes[0].startswith("SPI:") or partes[0] == "SPI:NONE":
+            return
+
+        nombre = partes[0].partition(":")[2].strip()
+        campos = {}
+        for parte in partes[1:]:
+            clave, separador, valor = parte.partition("=")
+            if separador:
+                campos[clave.strip().upper()] = valor.strip()
+
+        cs = campos.get("CS", "-")
+        comando = campos.get("CMD", "-")
+        data = campos.get("DATA", "-")
+        descripcion = _buscar_descripcion_spi(nombre, comando, data, catalogo_spi)
+        if "R1" in campos and data != "-":
+            data = f"R1={campos['R1']}; R2={data}"
+
+        for item in tabla_spi.get_children():
+            if tabla_spi.item(item, "values")[0] == cs:
+                tabla_spi.item(item, values=(cs, comando, data, descripcion))
+                return
+
+        tabla_spi.insert("", "end", values=(cs, comando, data, descripcion))
+
+    def limpiar_resultados_rastreo():
+        salida.delete("1.0", tk.END)
+        debug_output.delete("1.0", tk.END)
+        tabla_i2c.delete(*tabla_i2c.get_children())
+        tabla_uart.delete(*tabla_uart.get_children())
+        tabla_spi.delete(*tabla_spi.get_children())
+        indicador_i2c.apagar()
+        indicador_uart.apagar()
+        indicador_spi.apagar()
+        gps_coords_actuales[0] = None
+        gps_detectado[0] = False
+        reporte_disponible[0] = False
+        reporte_actual[0] = {}
+        boton_gps.config(text="🌐", state="disabled", bg="black", fg="white")
+        boton_reporte.config(state="disabled")
 
     # =========================
     # MOSTRAR RESULTADO
@@ -760,6 +1345,22 @@ def crear_panel(root):
             texto = str(valor).strip()
             if not texto:
                 return
+            if texto.startswith("BOARD:"):
+                barCarga.actualizar(10)
+            elif texto.startswith("I2C"):
+                barCarga.actualizar(25)
+            elif texto.startswith("SPI:"):
+                barCarga.actualizar(45)
+            elif texto.startswith(("UART_DEV:", "UART_INFO:")):
+                barCarga.actualizar(65)
+            elif texto.startswith("GPS_COORDS:"):
+                barCarga.actualizar(85)
+            elif texto.startswith("STATUS:READY"):
+                barCarga.actualizar(95)
+            if texto.startswith("UART_DEV:"):
+                actualizar_tabla_uart(texto)
+            elif texto.startswith("SPI:"):
+                actualizar_tabla_spi(texto)
             debug_output.insert(tk.END, f"{texto}\n")
             debug_output.see(tk.END)
             return
@@ -829,9 +1430,9 @@ def crear_panel(root):
     # RASTREAR
     # =========================
     def rastrear():
+        limpiar_resultados_rastreo()
 
         if escaneo_activo[0]:
-            salida.delete("1.0", tk.END)
             salida.insert(tk.END, "Ya hay un rastreo en curso para este puerto.\n")
             return
 
@@ -842,22 +1443,12 @@ def crear_panel(root):
         escaneo_activo[0] = True
         cancelacion = threading.Event()
         rastreo_cancelacion[0] = cancelacion
+        barCarga.iniciar()
+        barCarga.actualizar(5)
         liberar_puertos()
 
         salida.delete("1.0", tk.END)
         salida.insert(tk.END, "🔍 Liberando puertos y rastreando...\n")
-
-        indicador_i2c.apagar()
-        indicador_uart.apagar()
-        indicador_spi.apagar()
-        gps_coords_actuales[0] = None
-        gps_detectado[0] = False
-        reporte_disponible[0] = False
-        debug_output.delete("1.0", tk.END)
-        boton_gps.config(text="🌐", state="disabled", bg="black", fg="white")
-        boton_reporte.config(state="disabled")
-
-        barCarga.iniciar()
 
         def tarea():
             try:
@@ -867,6 +1458,7 @@ def crear_panel(root):
                     on_evento=lambda tipo, valor: root.after(0, manejar_evento, tipo, valor, cancelacion),
                     cancelacion=cancelacion,
                 )
+                root.after(0, barCarga.actualizar, 95)
                 if not cancelacion.is_set():
                     root.after(0, lambda: mostrar_resultado(puerto, datos))
             finally:
@@ -962,6 +1554,7 @@ def crear_panel(root):
                 if liberar:
                     liberar_puertos()
                 raw = obtener_puertos()
+                root.after(0, barCarga.actualizar, 70)
                 root.after(0, completar_escaneo, raw, version)
             except Exception as error:
                 root.after(0, completar_escaneo, str(error), version)
@@ -972,12 +1565,14 @@ def crear_panel(root):
         if version != version_escaneo_puertos[0]:
             return
         try:
+            barCarga.actualizar(85)
             escanear(raw)
         finally:
             barCarga.detener()
             btn_actualizar.config(state="normal")
 
     def actualizar_puertos():
+        limpiar_resultados_rastreo()
         version_escaneo_puertos[0] += 1
         btn_actualizar.config(state="disabled")
         cancelacion = rastreo_cancelacion[0]

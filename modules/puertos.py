@@ -131,7 +131,7 @@ parsear = parsear_dispositivos
 # =========================
 # UI
 # =========================
-def crear_panel(root):
+def crear_panel(root, on_exit=None):
 
     seleccion = tk.StringVar()
 
@@ -167,8 +167,10 @@ def crear_panel(root):
 
     def iniciar_operacion():
         nonlocal operaciones_activas
+        if not operaciones_activas:
+            barCarga.iniciar()
         operaciones_activas += 1
-        barCarga.iniciar()
+        barCarga.actualizar(min(10 + operaciones_activas * 15, 70))
 
     def terminar_operacion():
         nonlocal operaciones_activas
@@ -176,9 +178,20 @@ def crear_panel(root):
         if not operaciones_activas:
             barCarga.detener()
 
-    tk.Label(main, text="Escanear Puertos",
+    tk.Label(main, text="Escanear puertos",
              fg=COLOR_TITULO, bg="black",
              font=("Arial", 14, "bold")).pack(pady=10)
+    tk.Label(
+        main,
+        text=(
+            "Se muestra información adicional que el fabricante imprime en la placa, "
+            "puede asociar una placa al dispositivo actual si lo desea."
+        ),
+        fg="cyan",
+        bg="black",
+        wraplength=580,
+        justify="center",
+    ).pack(fill="x", padx=10, pady=(0, 8))
 
     frame_btn = tk.Frame(main, bg="black")
     frame_btn.pack()
@@ -198,12 +211,23 @@ def crear_panel(root):
              fg="white", bg="black").pack(side="left")
 
     fqbn_var = tk.StringVar()
+    estilo_fqbn = ttk.Style(main)
+    estilo_fqbn.configure(
+        "Puertos.FQBN.TCombobox",
+        foreground=COLOR_OK,
+        fieldbackground="black",
+    )
+    estilo_fqbn.map(
+        "Puertos.FQBN.TCombobox",
+        foreground=[("readonly", COLOR_OK)],
+    )
     fqbn_combo = ttk.Combobox(
         frame_fqbn,
         textvariable=fqbn_var,
         state="readonly",
         values=sorted({v["fqbn"] for v in boards.values()}),
         width=28,
+        style="Puertos.FQBN.TCombobox",
     )
     fqbn_combo.pack(side="left", fill="x", expand=False)
 
@@ -299,6 +323,7 @@ def crear_panel(root):
 
         detalles.insert(tk.END, "\n=== DETALLE SISTEMA ===\n")
         detalles.insert(tk.END, d["raw"])
+        barCarga.actualizar(75)
 
         def consultar_firma():
             try:
@@ -382,11 +407,13 @@ def crear_panel(root):
             try:
                 liberar_puertos()
                 dispositivos = parsear(obtener_dispositivos())
+                root.after(0, barCarga.actualizar, 55)
             except Exception:
                 dispositivos = []
 
             def actualizar_panel():
                 try:
+                    barCarga.actualizar(70)
                     ejecutar(dispositivos)
                 finally:
                     terminar_operacion()
@@ -399,7 +426,14 @@ def crear_panel(root):
               command=escanear,
               bg="black", fg="white",
               highlightbackground="OliveDrab",
-              highlightthickness=1).pack()
+              highlightthickness=1).pack(side="left", padx=3)
+
+    if on_exit is not None:
+        tk.Button(frame_btn, text="✕ Salir",
+                  command=on_exit,
+                  bg="black", fg="white",
+                  highlightbackground="OliveDrab",
+                  highlightthickness=1).pack(side="left", padx=3)
 
     puerto_guardado = obtener_puerto_default()
     if puerto_guardado:

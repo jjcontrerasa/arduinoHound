@@ -74,7 +74,7 @@ void limpiarPinesDetectados() {
 // La salida SPI es adicional y conserva el protocolo serial existente.
 // Los dos primeros pines conservan la configuración original. El escaneo
 // automático prueba también otros GPIO que pueden usarse como CS.
-#define AUTO_SCAN_SPI_CS 0
+#define AUTO_SCAN_SPI_CS 1
 
 struct ModuloSPI {
   const char* nombre;
@@ -117,10 +117,25 @@ byte leerRegistroSPI(int csPin, byte registro) {
 }
 
 bool esPinSPIExcluido(byte pin) {
-  // No usar Serial USB ni las líneas físicas del bus SPI como CS.
+  // No usar UART USB ni las líneas físicas de los buses SPI e I2C como CS.
   if (pin == 0 || pin == 1 || pin == MOSI || pin == MISO || pin == SCK) {
     return true;
   }
+#if defined(ARDUINO_AVR_NANO_EVERY)
+  if (pin == A4 || pin == A5) {
+    return true;
+  }
+#endif
+#if defined(PIN_WIRE_SDA)
+  if (pin == PIN_WIRE_SDA) {
+    return true;
+  }
+#endif
+#if defined(PIN_WIRE_SCL)
+  if (pin == PIN_WIRE_SCL) {
+    return true;
+  }
+#endif
 
   return false;
 }
@@ -165,7 +180,11 @@ bool probarFlashSPI(int modulo) {
   Serial.print("SPI:");
   Serial.print(modulosFlashSPI[modulo].nombre);
   Serial.print(";CS=D");
-  Serial.println(csPin);
+  Serial.print(csPin);
+  Serial.print(";CMD=0x9F;DATA=0x");
+  Serial.print(manufacturer, HEX);
+  Serial.print(tipo, HEX);
+  Serial.println(capacidad, HEX);
   return true;
 }
 
@@ -180,7 +199,12 @@ bool probarModuloSPI(byte csPin, int modulo) {
   Serial.print("SPI:");
   Serial.print(modulosSPI[modulo].nombre);
   Serial.print(";CS=D");
-  Serial.println(csPin);
+  Serial.print(csPin);
+  Serial.print(";CMD=0x");
+  Serial.print(modulosSPI[modulo].regID | 0x80, HEX);
+  Serial.print(";DATA=0x");
+  Serial.print(id, HEX);
+  Serial.println(";MODE=0");
   return true;
 }
 
@@ -244,6 +268,35 @@ bool probarBMP280(byte csPin, byte &idDetectado, byte &modoDetectado) {
 }
 
 #if defined(ARDUINOHOUND_SD_DETECTION)
+void leerEstadoTarjetaSD(byte csPin, byte &respuestaR1, byte &estadoR2) {
+  respuestaR1 = 0xFF;
+  estadoR2 = 0xFF;
+
+  SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+  digitalWrite(csPin, HIGH);
+  SPI.transfer(0xFF);
+  digitalWrite(csPin, LOW);
+  SPI.transfer(0x4D);
+  SPI.transfer(0x00);
+  SPI.transfer(0x00);
+  SPI.transfer(0x00);
+  SPI.transfer(0x00);
+  SPI.transfer(0x01);
+
+  for (byte intento = 0; intento < 8; intento++) {
+    respuestaR1 = SPI.transfer(0xFF);
+    if ((respuestaR1 & 0x80) == 0) {
+      estadoR2 = SPI.transfer(0xFF);
+      break;
+    }
+  }
+
+  digitalWrite(csPin, HIGH);
+  SPI.transfer(0xFF);
+  SPI.endTransaction();
+
+}
+
 bool detectarTarjetaSD(byte &csEncontrado) {
   const byte csPins[] = {2, 3, 4, 5, 6, 7, 8, 9, 10};
 
@@ -261,8 +314,16 @@ bool detectarTarjetaSD(byte &csEncontrado) {
       digitalWrite(csPin, HIGH);
       csEncontrado = csPin;
       registrarPinCS(csPin);
+      byte respuestaR1, estadoR2;
+      leerEstadoTarjetaSD(csPin, respuestaR1, estadoR2);
       Serial.print("SPI:Tarjeta SD;CS=D");
-      Serial.println(csPin);
+      Serial.print(csPin);
+      Serial.print(";CMD=0xD;R1=0x");
+      Serial.print(respuestaR1, HEX);
+      Serial.print(";DATA=0x");
+      Serial.print(estadoR2, HEX);
+      Serial.print(";MODE=");
+      Serial.println(SPI_MODE0);
       return true;
     }
 
@@ -335,7 +396,7 @@ void detectarSPI() {
     digitalWrite(csPin, HIGH);
 
     for (int modulo = 0; modulo < NUM_MODULOS_SPI; modulo++) {
-      if (!encontrados[modulo] && probarModuloSPI(csPin, modulo)) {
+      if (probarModuloSPI(csPin, modulo)) {
         encontrados[modulo] = true;
       }
     }
@@ -347,7 +408,8 @@ void detectarSPI() {
   bool encontradoBMP280 = false;
   for (int pin = 2; pin <= 10; pin++) {
     byte csPin = (byte)pin;
-    bool yaDetectado = sdEncontrada && csPin == sdCsPin;
+    bool yaDetectado = pinesCSDetectados[csPin] ||
+               (sdEncontrada && csPin == sdCsPin);
 
     if (esPinSPIExcluido(csPin)) {
       continue;
@@ -374,7 +436,7 @@ void detectarSPI() {
       registrarPinCS(csPin);
       Serial.print(bmpId == 0x58 ? "SPI:BMP280;CS=D" : "SPI:BME280;CS=D");
       Serial.print(csPin);
-      Serial.print(";ID=0x");
+      Serial.print(";CMD=0xD0;DATA=0x");
       Serial.print(bmpId, HEX);
       Serial.print(";MODE=");
       Serial.println(bmpModo);
@@ -711,12 +773,12 @@ bool escanearPinSET(byte setPin) {
   delay(40);
 
   bool encontrado = false;
-  for (byte indiceBaud = 0; indiceBaud < sizeof(UART_SCAN_BAUDS) / sizeof(UART_SCAN_BAUDS[0]) && !encontrado; indiceBaud++) {
-    for (byte rxPin = SERIAL_SCAN_MIN_PIN; rxPin <= SERIAL_SCAN_MAX_PIN && !encontrado; rxPin++) {
-      if (!esPinSerialPermitido(rxPin) || pinesCSDetectados[rxPin] || rxPin == setPin) {
-        continue;
-      }
-      for (byte txPin = SERIAL_SCAN_MIN_PIN; txPin <= SERIAL_SCAN_MAX_PIN; txPin++) {
+  for (byte rxPin = SERIAL_SCAN_MIN_PIN; rxPin <= SERIAL_SCAN_MAX_PIN; rxPin++) {
+    if (!esPinSerialPermitido(rxPin) || pinesCSDetectados[rxPin] || rxPin == setPin) {
+      continue;
+    }
+    for (byte txPin = SERIAL_SCAN_MIN_PIN; txPin <= SERIAL_SCAN_MAX_PIN; txPin++) {
+      for (byte indiceBaud = 0; indiceBaud < sizeof(UART_SCAN_BAUDS) / sizeof(UART_SCAN_BAUDS[0]); indiceBaud++) {
         if (probarHC12ConSET(setPin, rxPin, txPin, UART_SCAN_BAUDS[indiceBaud])) {
           encontrado = true;
           break;
@@ -733,13 +795,15 @@ bool escanearPinesSET() {
   const byte pinesSET[] = {4, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13};
   bool encontrado = false;
 
-  for (byte i = 0; i < sizeof(pinesSET) && !encontrado; i++) {
+  for (byte i = 0; i < sizeof(pinesSET); i++) {
     byte setPin = pinesSET[i];
     if (!esPinSerialPermitido(setPin) || pinesCSDetectados[setPin] ||
         pinesUARTDetectados[setPin]) {
       continue;
     }
-    encontrado = escanearPinSET(setPin);
+    if (escanearPinSET(setPin)) {
+      encontrado = true;
+    }
   }
 
   return encontrado;
@@ -823,6 +887,8 @@ void informarPinesI2C() {
   Serial.print("D20");
 #elif defined(ARDUINO_AVR_LEONARDO) || defined(ARDUINO_AVR_MICRO)
   Serial.print("D2");
+#elif defined(ARDUINO_AVR_NANO_EVERY)
+  Serial.print("A4");
 #else
   Serial.print("A4");
 #endif
@@ -831,6 +897,8 @@ void informarPinesI2C() {
   Serial.println("D21");
 #elif defined(ARDUINO_AVR_LEONARDO) || defined(ARDUINO_AVR_MICRO)
   Serial.println("D3");
+#elif defined(ARDUINO_AVR_NANO_EVERY)
+  Serial.println("A5");
 #else
   Serial.println("A5");
 #endif
@@ -838,36 +906,36 @@ void informarPinesI2C() {
 
 // Recorre las direcciones I2C y reporta las que responden correctamente.
 void detectarI2C() {
-
-  byte error, address;
-  int found = 0;
+  byte direccionesEncontradas[126];
+  byte address;
+  byte found = 0;
 
   informarPinesI2C();
-  Serial.print("I2C:");
 
   for (address = 1; address < 127; address++) {
-
     Wire.beginTransmission(address);
-    error = Wire.endTransmission();
-
-    if (error == 0) {
-      if (found > 0) {
-        Serial.print(",");
-      }
-      Serial.print("0x");
-      if (address < 16) Serial.print("0");
-      Serial.print(address, HEX);
-      found++;
+    if (Wire.endTransmission() == 0) {
+      direccionesEncontradas[found++] = address;
     }
 
-    // Pausa breve para dar estabilidad al bus I2C entre consultas.
     delay(5);
   }
 
+  Serial.print("I2C:");
   if (found == 0) {
     Serial.print("NONE");
+  } else {
+    for (byte indice = 0; indice < found; indice++) {
+      if (indice > 0) {
+        Serial.print(",");
+      }
+      Serial.print("0x");
+      if (direccionesEncontradas[indice] < 16) {
+        Serial.print("0");
+      }
+      Serial.print(direccionesEncontradas[indice], HEX);
+    }
   }
-
   Serial.println();
 }
 

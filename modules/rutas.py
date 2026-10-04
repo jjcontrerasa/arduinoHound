@@ -43,8 +43,11 @@ def configurar_ventana(ventana):
         import ctypes
         hwnd = ctypes.windll.user32.GetParent(ventana.winfo_id())
         valor = ctypes.c_int(1)
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(
-            hwnd, 20, ctypes.byref(valor), ctypes.sizeof(valor)
-        )
+        for atributo in (20, 19):
+            resultado = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, atributo, ctypes.byref(valor), ctypes.sizeof(valor)
+            )
+            if resultado == 0:
+                break
     except (AttributeError, OSError):
         pass

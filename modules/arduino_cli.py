@@ -40,11 +40,16 @@ class ArduinoCLI:
         return subprocess.run(self.command + list(arguments), **kwargs)
 
     def initialize(self):
+        installed = self.run(
+            "core", "list", capture_output=True, text=True, check=True
+        ).stdout
+        missing_cores = [core for core in REQUIRED_CORES if core not in installed]
+        if not missing_cores:
+            return
+
         self.run("core", "update-index", check=True)
-        installed = self.run("core", "list", capture_output=True, text=True).stdout
-        for core in REQUIRED_CORES:
-            if core not in installed:
-                self.run("core", "install", core, check=True)
+        for core in missing_cores:
+            self.run("core", "install", core, check=True)
 
     def list_boards(self):
         return self.run("board", "list", capture_output=True, text=True).stdout
