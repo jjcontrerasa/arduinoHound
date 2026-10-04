@@ -103,18 +103,23 @@ def formatear_uart(raw_value):
         nombre_upper = nombre.upper()
         rx = partes.get("RX", "-")
         tx = partes.get("TX", "-")
+        set_pin = partes.get("SET", "-")
+        baud = partes.get("BAUD", "-")
 
         if nombre_upper == "GPS":
             return f"GPS (RX={rx}, TX={tx})"
         if nombre_upper in {"HC12", "HC-12", "HC_12"}:
-            return f"HC-12 (RX={rx}, TX={tx})"
+            set_text = f", SET={set_pin}" if set_pin != "-" else ""
+            baud_text = f", {baud} baud" if baud != "-" else ""
+            return f"HC-12 (RX={rx}, TX={tx}{set_text}{baud_text})"
         if nombre_upper == "LORA_RYLR998":
-            return f"LoRa RYLR998 (RX={rx}, TX={tx})"
+            baud_text = f", {baud} baud" if baud != "-" else ""
+            return f"LoRa RYLR998 (RX={rx}, TX={tx}{baud_text})"
         if nombre_upper == "TRANSCEIVER":
             tipo = partes.get("TYPE", "Transceptor UART")
             return f"{tipo} (RX={rx}, TX={tx})"
         if nombre_upper in {"UNKNOWN", "NINGUNO"}:
-            return "UART desconocido"
+            return "ninguno"
         return f"{nombre} (RX={rx}, TX={tx})"
 
     texto_upper = texto.upper()
@@ -129,7 +134,7 @@ def formatear_uart(raw_value):
     return texto
 
 
-def leer_datos(puerto, baudrate=115200, timeout=2, on_evento=None):
+def leer_datos(puerto, baudrate=115200, timeout=2, on_evento=None, cancelacion=None):
     """Lee el ciclo de detección del sketch.
 
     on_evento(tipo, valor) se invoca en cuanto llega la línea correspondiente,
@@ -139,10 +144,18 @@ def leer_datos(puerto, baudrate=115200, timeout=2, on_evento=None):
     datos = {"board": "-", "i2c": "-", "i2c_pines": "-", "uart": "-", "lora": "-", "spi": "-", "gps_coords": None}
     try:
         with serial.Serial(puerto, baudrate, timeout=timeout) as connection:
-            time.sleep(2)
-            deadline = time.monotonic() + 30
+            if cancelacion is not None:
+                if cancelacion.wait(2):
+                    return datos
+            else:
+                time.sleep(2)
+            deadline = time.monotonic() + 150
             while time.monotonic() < deadline:
+                if cancelacion is not None and cancelacion.is_set():
+                    break
                 line = connection.readline().decode(errors="ignore").strip()
+                if cancelacion is not None and cancelacion.is_set():
+                    break
                 if not line:
                     continue
                 if line.startswith("BOARD:"):
@@ -155,8 +168,13 @@ def leer_datos(puerto, baudrate=115200, timeout=2, on_evento=None):
                     if on_evento:
                         on_evento("i2c", datos["i2c"])
                 elif line.startswith("UART_DEV:"):
-                    datos["uart"] = formatear_uart(line.replace("UART_DEV:", ""))
-                    if on_evento:
+                    modulo = formatear_uart(line.replace("UART_DEV:", ""))
+                    if modulo.lower() != "ninguno":
+                        modulos_uart = datos["uart"].split(" | ") if datos["uart"] not in {"-", ""} else []
+                        if modulo not in modulos_uart:
+                            modulos_uart.append(modulo)
+                        datos["uart"] = " | ".join(modulos_uart)
+                    if on_evento and modulo.lower() != "ninguno":
                         on_evento("uart", datos["uart"])
                 elif line.startswith("LORA_INFO:"):
                     datos["lora"] = line.replace("LORA_INFO:", "")
@@ -170,9 +188,9 @@ def leer_datos(puerto, baudrate=115200, timeout=2, on_evento=None):
                         datos["spi"] = modulo
                     else:
                         datos["spi"] += "," + modulo
-                elif line.startswith("STATUS:READY"):
-                    if on_evento:
+                    if on_evento and modulo.strip().lower() not in {"none", "-"}:
                         on_evento("spi", datos["spi"])
+                elif line.startswith("STATUS:READY"):
                     break
 
                 if on_evento:
@@ -180,8 +198,9 @@ def leer_datos(puerto, baudrate=115200, timeout=2, on_evento=None):
 
                 if line.startswith("STATUS:READY"):
                     break
-    except serial.SerialException:
+    except serial.SerialException as error:
         datos["board"] = "PUERTO OCUPADO"
+        datos["error_puerto"] = str(error)
     except Exception as error:
         datos["board"] = f"Error: {error}"
     return datos

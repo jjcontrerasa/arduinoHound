@@ -1,14 +1,21 @@
 #include <Wire.h>
 #include <SPI.h>
+#if defined(ARDUINO_AVR_NANO_EVERY) || defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_MEGA1280)
+#include <SD.h>
+#define ARDUINOHOUND_SD_DETECTION
+#endif
 
 // ================= CONFIGURACIÓN DE LA PLACA =================
-#if defined(ARDUINO_MEGAAVR_NANO_EVERY)
+#if defined(ARDUINO_AVR_NANO_EVERY)
+  #include <SoftwareSerial.h>
   #define uart Serial1
   #define BOARD_NAME "NANO_EVERY"
 #elif defined(ARDUINO_AVR_MEGA2560)
+  #include <SoftwareSerial.h>
   #define uart Serial1
   #define BOARD_NAME "MEGA2560"
 #elif defined(ARDUINO_AVR_MEGA1280)
+  #include <SoftwareSerial.h>
   #define uart Serial1
   #define BOARD_NAME "MEGA1280"
 #elif defined(ARDUINO_AVR_LEONARDO)
@@ -35,6 +42,33 @@
 #define GPS_BAUD 9600
 #define SERIAL_SCAN_MIN_PIN 2
 #define SERIAL_SCAN_MAX_PIN 13
+const unsigned long UART_SCAN_BAUDS[] = {9600, 57600, 115200};
+bool pinesCSDetectados[SERIAL_SCAN_MAX_PIN + 1] = {false};
+bool pinesUARTDetectados[SERIAL_SCAN_MAX_PIN + 1] = {false};
+bool hc12Encontrado = false;
+
+void registrarPinCS(byte pin) {
+  if (pin <= SERIAL_SCAN_MAX_PIN) {
+    pinesCSDetectados[pin] = true;
+  }
+}
+
+void registrarPinesUART(byte rxPin, byte txPin) {
+  if (rxPin <= SERIAL_SCAN_MAX_PIN) {
+    pinesUARTDetectados[rxPin] = true;
+  }
+  if (txPin <= SERIAL_SCAN_MAX_PIN) {
+    pinesUARTDetectados[txPin] = true;
+  }
+}
+
+void limpiarPinesDetectados() {
+  for (byte pin = 0; pin <= SERIAL_SCAN_MAX_PIN; pin++) {
+    pinesCSDetectados[pin] = false;
+    pinesUARTDetectados[pin] = false;
+  }
+  hc12Encontrado = false;
+}
 
 // ================= CONFIGURACIÓN DE MÓDULOS SPI =================
 // La salida SPI es adicional y conserva el protocolo serial existente.
@@ -127,8 +161,11 @@ bool probarFlashSPI(int modulo) {
     return false;
   }
 
+  registrarPinCS(csPin);
   Serial.print("SPI:");
-  Serial.println(modulosFlashSPI[modulo].nombre);
+  Serial.print(modulosFlashSPI[modulo].nombre);
+  Serial.print(";CS=D");
+  Serial.println(csPin);
   return true;
 }
 
@@ -139,12 +176,112 @@ bool probarModuloSPI(byte csPin, int modulo) {
     return false;
   }
 
+  registrarPinCS(csPin);
   Serial.print("SPI:");
-  Serial.println(modulosSPI[modulo].nombre);
+  Serial.print(modulosSPI[modulo].nombre);
+  Serial.print(";CS=D");
+  Serial.println(csPin);
   return true;
 }
 
+bool probarDispositivoSPIGenerico(byte csPin, byte &comandoDetectado,
+                                  byte &respuestaDetectada, byte &modoDetectado) {
+  const byte comandos[] = {0x00, 0x9F};
+  const byte modos[] = {SPI_MODE0, SPI_MODE1, SPI_MODE2, SPI_MODE3};
+
+  for (byte comando = 0; comando < sizeof(comandos); comando++) {
+    for (byte modo = 0; modo < sizeof(modos); modo++) {
+      byte respuestas[3];
+
+      for (byte muestra = 0; muestra < 3; muestra++) {
+        SPI.beginTransaction(SPISettings(100000, MSBFIRST, modos[modo]));
+        digitalWrite(csPin, LOW);
+        SPI.transfer(comandos[comando]);
+        respuestas[muestra] = SPI.transfer(0x00);
+        digitalWrite(csPin, HIGH);
+        SPI.endTransaction();
+        delayMicroseconds(50);
+      }
+
+      // SPI no define una consulta universal; se descartan MISO inactivo y lecturas inestables.
+      if (respuestas[0] != 0x00 && respuestas[0] != 0xFF &&
+          respuestas[0] == respuestas[1] && respuestas[1] == respuestas[2]) {
+        comandoDetectado = comandos[comando];
+        respuestaDetectada = respuestas[0];
+        modoDetectado = modo;
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+bool probarBMP280(byte csPin, byte &idDetectado, byte &modoDetectado) {
+  const byte modos[] = {SPI_MODE0, SPI_MODE3};
+
+  for (byte modo = 0; modo < sizeof(modos); modo++) {
+    byte ids[2];
+
+    for (byte muestra = 0; muestra < 2; muestra++) {
+      SPI.beginTransaction(SPISettings(100000, MSBFIRST, modos[modo]));
+      digitalWrite(csPin, LOW);
+      SPI.transfer(0xD0);
+      ids[muestra] = SPI.transfer(0x00);
+      digitalWrite(csPin, HIGH);
+      SPI.endTransaction();
+      delayMicroseconds(50);
+    }
+
+    if (ids[0] == ids[1] && (ids[0] == 0x58 || ids[0] == 0x60)) {
+      idDetectado = ids[0];
+      modoDetectado = modo == 0 ? 0 : 3;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+#if defined(ARDUINOHOUND_SD_DETECTION)
+bool detectarTarjetaSD(byte &csEncontrado) {
+  const byte csPins[] = {2, 3, 4, 5, 6, 7, 8, 9, 10};
+
+  for (byte i = 0; i < sizeof(csPins); i++) {
+    byte csPin = csPins[i];
+    if (esPinSPIExcluido(csPin)) {
+      continue;
+    }
+
+    pinMode(csPin, OUTPUT);
+    digitalWrite(csPin, HIGH);
+    delay(100);
+
+    if (SD.begin(csPin)) {
+      digitalWrite(csPin, HIGH);
+      csEncontrado = csPin;
+      registrarPinCS(csPin);
+      Serial.print("SPI:Tarjeta SD;CS=D");
+      Serial.println(csPin);
+      return true;
+    }
+
+    digitalWrite(csPin, HIGH);
+  }
+
+  return false;
+}
+#endif
+
 void detectarSPI() {
+  for (int pin = 2; pin <= 10; pin++) {
+    byte csPin = (byte)pin;
+    if (!esPinSPIExcluido(csPin)) {
+      pinMode(csPin, OUTPUT);
+      digitalWrite(csPin, HIGH);
+    }
+  }
+
   for (int i = 0; i < NUM_MODULOS_SPI; i++) {
     pinMode(modulosSPI[i].csPin, OUTPUT);
     digitalWrite(modulosSPI[i].csPin, HIGH);
@@ -156,18 +293,25 @@ void detectarSPI() {
 
   bool encontrados[NUM_MODULOS_SPI] = {false};
   bool encontradosFlash[NUM_MODULOS_FLASH_SPI] = {false};
+  byte sdCsPin = 0;
+  bool sdEncontrada = false;
+#if defined(ARDUINOHOUND_SD_DETECTION)
+  sdEncontrada = detectarTarjetaSD(sdCsPin);
+#endif
 
   // Primero se prueban los pines declarados explícitamente.
   for (int modulo = 0; modulo < NUM_MODULOS_SPI; modulo++) {
     byte csPin = modulosSPI[modulo].csPin;
 
-    if (!encontrados[modulo] && probarModuloSPI(csPin, modulo)) {
+    if (!(sdEncontrada && csPin == sdCsPin) &&
+        !encontrados[modulo] && probarModuloSPI(csPin, modulo)) {
       encontrados[modulo] = true;
     }
   }
 
   for (int modulo = 0; modulo < NUM_MODULOS_FLASH_SPI; modulo++) {
-    if (!encontradosFlash[modulo] && probarFlashSPI(modulo)) {
+    if (!(sdEncontrada && modulosFlashSPI[modulo].csPin == sdCsPin) &&
+        !encontradosFlash[modulo] && probarFlashSPI(modulo)) {
       encontradosFlash[modulo] = true;
     }
   }
@@ -198,7 +342,61 @@ void detectarSPI() {
   }
 #endif
 
-  bool encontrado = false;
+  // Barrido genérico: los módulos ya identificados conservan su nombre conocido.
+  bool encontradoGenerico = false;
+  bool encontradoBMP280 = false;
+  for (int pin = 2; pin <= 10; pin++) {
+    byte csPin = (byte)pin;
+    bool yaDetectado = sdEncontrada && csPin == sdCsPin;
+
+    if (esPinSPIExcluido(csPin)) {
+      continue;
+    }
+
+    for (int modulo = 0; modulo < NUM_MODULOS_SPI; modulo++) {
+      if (modulosSPI[modulo].csPin == csPin && encontrados[modulo]) {
+        yaDetectado = true;
+      }
+    }
+    for (int modulo = 0; modulo < NUM_MODULOS_FLASH_SPI; modulo++) {
+      if (modulosFlashSPI[modulo].csPin == csPin && encontradosFlash[modulo]) {
+        yaDetectado = true;
+      }
+    }
+
+    if (yaDetectado) {
+      continue;
+    }
+
+    byte bmpId, bmpModo;
+    if (probarBMP280(csPin, bmpId, bmpModo)) {
+      encontradoBMP280 = true;
+      registrarPinCS(csPin);
+      Serial.print(bmpId == 0x58 ? "SPI:BMP280;CS=D" : "SPI:BME280;CS=D");
+      Serial.print(csPin);
+      Serial.print(";ID=0x");
+      Serial.print(bmpId, HEX);
+      Serial.print(";MODE=");
+      Serial.println(bmpModo);
+      continue;
+    }
+
+    byte comando, respuesta, modo;
+    if (probarDispositivoSPIGenerico(csPin, comando, respuesta, modo)) {
+      encontradoGenerico = true;
+      registrarPinCS(csPin);
+      Serial.print("SPI:Posible dispositivo SPI;CS=D");
+      Serial.print(csPin);
+      Serial.print(";CMD=0x");
+      Serial.print(comando, HEX);
+      Serial.print(";DATA=0x");
+      Serial.print(respuesta, HEX);
+      Serial.print(";MODE=");
+      Serial.println(modo);
+    }
+  }
+
+  bool encontrado = sdEncontrada || encontradoBMP280 || encontradoGenerico;
   for (int modulo = 0; modulo < NUM_MODULOS_SPI; modulo++) {
     if (encontrados[modulo]) {
       encontrado = true;
@@ -217,22 +415,33 @@ void detectarSPI() {
 
 // ================= CONSULTA DE PARÁMETROS LORA =================
 // Envía un comando AT y recopila la respuesta del módulo RYLR998.
-String consultarLora(const char *comando) {
+String consultarLora(const char *comando, unsigned long baudRate) {
+  uart.end();
+  uart.begin(baudRate);
+  delay(5);
   uart.println(comando);
 
   unsigned long inicio = millis();
+  unsigned long ultimoByte = inicio;
   String respuesta;
 
-  while (millis() - inicio < 500) {
+  while (millis() - inicio < 150) {
     while (uart.available()) {
       char caracter = uart.read();
+      ultimoByte = millis();
 
       if (caracter != '\r' && caracter != '\n') {
         respuesta += caracter;
       }
     }
+    if (respuesta.length() > 0 && millis() - ultimoByte >= 25) {
+      break;
+    }
+    delay(1);
   }
 
+  uart.end();
+  uart.begin(UART_BAUD);
   return respuesta;
 }
 
@@ -254,11 +463,13 @@ bool esPinSerialPermitido(byte pin) {
 
 String leerRespuestaSoftware(SoftwareSerial &puerto, unsigned long timeout) {
   unsigned long inicio = millis();
+  unsigned long ultimoByte = inicio;
   String respuesta = "";
 
   while (millis() - inicio < timeout) {
     while (puerto.available()) {
       char c = puerto.read();
+      ultimoByte = millis();
       if (c == '\r' || c == '\n') {
         if (respuesta.length() > 0) {
           respuesta += ' ';
@@ -267,7 +478,10 @@ String leerRespuestaSoftware(SoftwareSerial &puerto, unsigned long timeout) {
       }
       respuesta += c;
     }
-    delay(10);
+    if (respuesta.length() > 0 && millis() - ultimoByte >= 25) {
+      break;
+    }
+    delay(1);
   }
 
   return respuesta;
@@ -311,7 +525,6 @@ bool esRespuestaTransceptor(const String &respuesta) {
 
   return respuesta.length() > 0 && (
     texto.indexOf("OK") >= 0 ||
-    texto.indexOf("AT") >= 0 ||
     texto.indexOf("HC-12") >= 0 ||
     texto.indexOf("MODE") >= 0 ||
     texto.indexOf("VERSION") >= 0 ||
@@ -326,6 +539,9 @@ bool esRespuestaTransceptor(const String &respuesta) {
 }
 
 void informarGPS(byte rxPin, byte txPin, float lat, float lon, bool coordsListas) {
+  if (rxPin != 0 || txPin != 0) {
+    registrarPinesUART(rxPin, txPin);
+  }
   Serial.print("UART_DEV:GPS;RX=");
   Serial.print(rxPin);
   Serial.print(";TX=");
@@ -340,94 +556,193 @@ void informarGPS(byte rxPin, byte txPin, float lat, float lon, bool coordsListas
   }
 }
 
-bool probarPuertoSerial(byte rxPin, byte txPin, bool escucharGPSPrimero = false) {
+bool probarPuertoSerial(byte rxPin, byte txPin) {
   if (rxPin == txPin || !esPinSerialPermitido(rxPin) || !esPinSerialPermitido(txPin)) {
     return false;
   }
 
   SoftwareSerial prueba(rxPin, txPin);
-  prueba.begin(escucharGPSPrimero ? GPS_BAUD : UART_BAUD);
-  delay(200);
+  for (byte indiceBaud = 0; indiceBaud < sizeof(UART_SCAN_BAUDS) / sizeof(UART_SCAN_BAUDS[0]); indiceBaud++) {
+    prueba.begin(UART_SCAN_BAUDS[indiceBaud]);
+    delay(5);
 
-  if (escucharGPSPrimero) {
-    float lat = 0.0, lon = 0.0;
-    bool gpsDetectado = leerGPSSoftware(prueba, 1800, lat, lon);
-    if (gpsDetectado) {
-      informarGPS(rxPin, txPin, lat, lon, lat != 0.0 || lon != 0.0);
+    prueba.println("AT");
+    String respuesta = leerRespuestaSoftware(prueba, 120);
+    bool esHC12 = respuesta.indexOf("OK+") >= 0 || respuesta.indexOf("HC-12") >= 0;
+    if (esHC12) {
+      hc12Encontrado = true;
+      registrarPinesUART(rxPin, txPin);
+      Serial.print("UART_DEV:HC12;RX=");
+      Serial.print(rxPin);
+      Serial.print(";TX=");
+      Serial.print(txPin);
+      Serial.print(";BAUD=");
+      Serial.println(UART_SCAN_BAUDS[indiceBaud]);
+      Serial.print("UART_INFO:");
+      Serial.println(respuesta);
       prueba.end();
       return true;
     }
-    prueba.end();
-    prueba.begin(UART_BAUD);
-    delay(50);
-  }
 
-  prueba.println("AT");
-  String respuesta = leerRespuestaSoftware(prueba, 500);
-  if (esRespuestaTransceptor(respuesta)) {
-    Serial.print("UART_DEV:TRANSCEIVER;RX=");
-    Serial.print(rxPin);
-    Serial.print(";TX=");
-    Serial.print(txPin);
-    Serial.print(";TYPE=");
-    Serial.print(respuesta.length() > 0 ? "AT_RESP" : "SERIAL");
-    Serial.println();
-    if (respuesta.length() > 0) {
+    prueba.println("AT+ADDRESS?");
+    String respuestaLora = leerRespuestaSoftware(prueba, 120);
+    if (respuestaLora.indexOf("+ADDRESS=") >= 0) {
+      registrarPinesUART(rxPin, txPin);
+      Serial.print("UART_DEV:LORA_RYLR998;RX=");
+      Serial.print(rxPin);
+      Serial.print(";TX=");
+      Serial.print(txPin);
+      Serial.print(";BAUD=");
+      Serial.println(UART_SCAN_BAUDS[indiceBaud]);
+      Serial.print("LORA_INFO:");
+      Serial.println(respuestaLora);
+      prueba.end();
+      return true;
+    }
+
+    if (esRespuestaTransceptor(respuesta)) {
+      registrarPinesUART(rxPin, txPin);
+      Serial.print("UART_DEV:TRANSCEIVER;RX=");
+      Serial.print(rxPin);
+      Serial.print(";TX=");
+      Serial.print(txPin);
+      Serial.print(";BAUD=");
+      Serial.println(UART_SCAN_BAUDS[indiceBaud]);
       Serial.print("UART_INFO:");
       Serial.println(respuesta);
+      prueba.end();
+      return true;
     }
-    prueba.end();
-    return true;
-  }
-
-  prueba.println("AT+ADDRESS?");
-  String respuestaLora = leerRespuestaSoftware(prueba, 500);
-  if (respuestaLora.indexOf("+ADDRESS=") >= 0) {
-    Serial.print("UART_DEV:LORA_RYLR998;RX=");
-    Serial.print(rxPin);
-    Serial.print(";TX=");
-    Serial.print(txPin);
-    Serial.println();
-    Serial.print("LORA_INFO:");
-    Serial.println(respuestaLora);
-    prueba.end();
-    return true;
-  }
-
-  prueba.end();
-  prueba.begin(GPS_BAUD);
-  delay(50);
-  float lat = 0.0, lon = 0.0;
-  bool gpsDetectado = leerGPSSoftware(prueba, 1500, lat, lon);
-
-  if (gpsDetectado) {
-    informarGPS(rxPin, txPin, lat, lon, lat != 0.0 || lon != 0.0);
-    prueba.end();
-    return true;
   }
 
   prueba.end();
   return false;
 }
 
-bool escanearPuertosSerial() {
-  if (probarPuertoSerial(4, 5, true) || probarPuertoSerial(5, 4, true) ||
-      probarPuertoSerial(2, 3, true) || probarPuertoSerial(3, 2, true)) {
-    return true;
+bool escanearGPSSoftware() {
+  bool encontrado = false;
+
+  for (byte rxPin = SERIAL_SCAN_MIN_PIN; rxPin <= SERIAL_SCAN_MAX_PIN; rxPin++) {
+    if (!esPinSerialPermitido(rxPin)) {
+      continue;
+    }
+
+    byte txPin = rxPin == SERIAL_SCAN_MIN_PIN ? SERIAL_SCAN_MIN_PIN + 1 : SERIAL_SCAN_MIN_PIN;
+    if (!esPinSerialPermitido(txPin) || txPin == rxPin) {
+      continue;
+    }
+
+    SoftwareSerial prueba(rxPin, txPin);
+    prueba.begin(GPS_BAUD);
+    delay(5);
+
+    float lat = 0.0, lon = 0.0;
+    if (leerGPSSoftware(prueba, 1200, lat, lon)) {
+      informarGPS(rxPin, txPin, lat, lon, lat != 0.0 || lon != 0.0);
+      encontrado = true;
+      prueba.end();
+      break;
+    }
+    prueba.end();
   }
 
+  return encontrado;
+}
+
+bool escanearPuertosSerial(bool buscarGPS) {
+  bool encontrado = buscarGPS && escanearGPSSoftware();
+
   for (byte rx = SERIAL_SCAN_MIN_PIN; rx <= SERIAL_SCAN_MAX_PIN; rx++) {
-    for (byte tx = rx + 1; tx <= SERIAL_SCAN_MAX_PIN; tx++) {
-      if ((rx == 2 && tx == 3) || (rx == 3 && tx == 2)) {
+    for (byte tx = SERIAL_SCAN_MIN_PIN; tx <= SERIAL_SCAN_MAX_PIN; tx++) {
+      if (rx == tx || !esPinSerialPermitido(rx) || !esPinSerialPermitido(tx)) {
         continue;
       }
       if (probarPuertoSerial(rx, tx)) {
-        return true;
+        encontrado = true;
       }
     }
   }
 
-  return false;
+  return encontrado;
+}
+
+bool esRespuestaHC12(const String &respuesta) {
+  String texto = respuesta;
+  texto.toUpperCase();
+  return texto.indexOf("OK+FU") >= 0 || texto.indexOf("OK+HC-12") >= 0;
+}
+
+bool probarHC12ConSET(byte setPin, byte rxPin, byte txPin, unsigned long baudRate) {
+  if (rxPin == txPin || rxPin == setPin || txPin == setPin ||
+      !esPinSerialPermitido(rxPin) || !esPinSerialPermitido(txPin) ||
+      pinesCSDetectados[rxPin] || pinesCSDetectados[txPin]) {
+    return false;
+  }
+
+  SoftwareSerial prueba(rxPin, txPin);
+  prueba.begin(baudRate);
+  delay(5);
+  prueba.println("AT+RX");
+  String respuesta = leerRespuestaSoftware(prueba, 45);
+  prueba.end();
+
+  if (!esRespuestaHC12(respuesta)) {
+    return false;
+  }
+
+  hc12Encontrado = true;
+  registrarPinesUART(rxPin, txPin);
+  Serial.print("UART_DEV:HC12;RX=");
+  Serial.print(rxPin);
+  Serial.print(";TX=");
+  Serial.print(txPin);
+  Serial.print(";SET=");
+  Serial.print(setPin);
+  Serial.print(";BAUD=");
+  Serial.println(baudRate);
+  Serial.print("UART_INFO:");
+  Serial.println(respuesta);
+  return true;
+}
+
+bool escanearPinSET(byte setPin) {
+  pinMode(setPin, OUTPUT);
+  digitalWrite(setPin, LOW);
+  delay(40);
+
+  bool encontrado = false;
+  for (byte indiceBaud = 0; indiceBaud < sizeof(UART_SCAN_BAUDS) / sizeof(UART_SCAN_BAUDS[0]) && !encontrado; indiceBaud++) {
+    for (byte rxPin = SERIAL_SCAN_MIN_PIN; rxPin <= SERIAL_SCAN_MAX_PIN && !encontrado; rxPin++) {
+      if (!esPinSerialPermitido(rxPin) || pinesCSDetectados[rxPin] || rxPin == setPin) {
+        continue;
+      }
+      for (byte txPin = SERIAL_SCAN_MIN_PIN; txPin <= SERIAL_SCAN_MAX_PIN; txPin++) {
+        if (probarHC12ConSET(setPin, rxPin, txPin, UART_SCAN_BAUDS[indiceBaud])) {
+          encontrado = true;
+          break;
+        }
+      }
+    }
+  }
+
+  pinMode(setPin, INPUT_PULLUP);
+  return encontrado;
+}
+
+bool escanearPinesSET() {
+  const byte pinesSET[] = {4, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13};
+  bool encontrado = false;
+
+  for (byte i = 0; i < sizeof(pinesSET) && !encontrado; i++) {
+    byte setPin = pinesSET[i];
+    if (!esPinSerialPermitido(setPin) || pinesCSDetectados[setPin] ||
+        pinesUARTDetectados[setPin]) {
+      continue;
+    }
+    encontrado = escanearPinSET(setPin);
+  }
+
+  return encontrado;
 }
 
 void setup() {
@@ -477,6 +792,8 @@ void setup() {
 // ================= LOOP =================
 void loop() {
 
+  limpiarPinesDetectados();
+
   // -------- SUBPROCESO 1: IDENTIFICACIÓN DE LA PLACA --------
   // Es una salida inmediata y no requiere comunicación con dispositivos.
   Serial.print("BOARD:");
@@ -485,12 +802,12 @@ void loop() {
   // -------- SUBPROCESO 2: DETECCIÓN DE DISPOSITIVOS I2C --------
   detectarI2C();
 
-  // -------- SUBPROCESO 3: DETECCIÓN UART Y GPS --------
+  // -------- SUBPROCESO 3: DETECCIÓN DE DISPOSITIVOS SPI --------
+  detectarSPI();
+
+  // -------- SUBPROCESO 4: DETECCIÓN UART Y GPS --------
   // La detección GPS forma parte de esta fase y no depende de obtener fix.
   detectarGPS();
-
-  // -------- SUBPROCESO 4: DETECCIÓN DE DISPOSITIVOS SPI --------
-  detectarSPI();
 
   // Indica al programa Python que terminó el ciclo de detección.
   Serial.println("STATUS:READY");
@@ -610,7 +927,7 @@ bool parsearCoordenadasNMEA(String trama, float &lat, float &lon) {
 
 // ================= DETECCIÓN DE DISPOSITIVOS UART =================
 bool escucharGPSHardware() {
-#if defined(ARDUINO_MEGAAVR_NANO_EVERY) || defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_MEGA1280) || defined(ARDUINO_AVR_LEONARDO) || defined(ARDUINO_AVR_MICRO)
+#if defined(ARDUINO_AVR_NANO_EVERY) || defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_MEGA1280) || defined(ARDUINO_AVR_LEONARDO) || defined(ARDUINO_AVR_MICRO)
   unsigned long inicio = millis();
   bool detectado = false;
   String trama = "";
@@ -647,22 +964,47 @@ bool escucharGPSHardware() {
 void detectarGPS() {
   bool detectado = escucharGPSHardware();
 
-  if (!detectado && (uart.available() || uart.peek() >= 0)) {
-    String respuestaLora = consultarLora("AT+ADDRESS?");
-    if (respuestaLora.indexOf("+ADDRESS=") >= 0) {
-      Serial.print("UART_DEV:LORA_RYLR998;RX=");
-      Serial.print("HW");
-      Serial.print(";TX=");
-      Serial.print("HW");
-      Serial.println();
-      Serial.print("LORA_INFO:");
-      Serial.println(respuestaLora);
-      detectado = true;
+  if (!detectado) {
+    for (byte indiceBaud = 0; indiceBaud < sizeof(UART_SCAN_BAUDS) / sizeof(UART_SCAN_BAUDS[0]); indiceBaud++) {
+      String respuesta = consultarLora("AT", UART_SCAN_BAUDS[indiceBaud]);
+      bool esHC12 = respuesta.indexOf("OK+") >= 0 || respuesta.indexOf("HC-12") >= 0;
+      if (esHC12) {
+        Serial.print("UART_DEV:HC12;RX=HW;TX=HW;BAUD=");
+        Serial.println(UART_SCAN_BAUDS[indiceBaud]);
+        Serial.print("UART_INFO:");
+        Serial.println(respuesta);
+        detectado = true;
+        break;
+      }
+
+      String respuestaLora = consultarLora("AT+ADDRESS?", UART_SCAN_BAUDS[indiceBaud]);
+      if (respuestaLora.indexOf("+ADDRESS=") >= 0) {
+        Serial.print("UART_DEV:LORA_RYLR998;RX=HW;TX=HW;BAUD=");
+        Serial.println(UART_SCAN_BAUDS[indiceBaud]);
+        Serial.print("LORA_INFO:");
+        Serial.println(respuestaLora);
+        detectado = true;
+        break;
+      }
+
+      if (esRespuestaTransceptor(respuesta)) {
+        Serial.print("UART_DEV:TRANSCEIVER;RX=HW;TX=HW;BAUD=");
+        Serial.println(UART_SCAN_BAUDS[indiceBaud]);
+        Serial.print("UART_INFO:");
+        Serial.println(respuesta);
+        detectado = true;
+        break;
+      }
     }
   }
 
-  if (!detectado) {
-    detectado = escanearPuertosSerial();
+  bool encontradoSoftware = escanearPuertosSerial(!detectado);
+  if (encontradoSoftware) {
+    detectado = true;
+  }
+
+  if (escanearPinesSET()) {
+    detectado = true;
   }
 
   if (!detectado) {
