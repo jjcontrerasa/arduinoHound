@@ -1,0 +1,9 @@
+{
+    "archivos": {
+        "boards.sql": "90235ac20850ba50f6269a852ca40a886b3b5cdcdabddd6a7a90e423d5fcc02e",
+        "dispositivos_i2c.json": "8610f26d57d7368303bc89197fbae341376af2e310b06551992c85ec0b5a693a",
+        "dispositivos_spi.json": "606317d4b977a064975225d1fd0f0e3dad01213ff493fa3ea40b766d603e3bc9",
+        "firmas_avr.json": "86d90bebf4f2d97ed1a85888f341892153689eb7360fec4e613df879e95d93f0",
+        "placas.json": "9f2638c93455aa799c7956f0e9c435fb7b4caaa066d4438603b7da021d3d14b8"
+    }
+}
