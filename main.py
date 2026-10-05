@@ -1,3 +1,5 @@
+import subprocess
+import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
@@ -8,6 +10,22 @@ except ImportError:
     Image = None
     ImageEnhance = None
     ImageTk = None
+
+def _ocultar_consolas_subprocesos():
+    # Evita que cada subproceso (arduino-cli, powershell, etc.) abra una ventana CMD en Windows.
+    if sys.platform != "win32":
+        return
+    original = subprocess.Popen
+
+    class PopenSinConsola(original):
+        def __init__(self, *args, **kwargs):
+            kwargs["creationflags"] = kwargs.get("creationflags", 0) | subprocess.CREATE_NO_WINDOW
+            super().__init__(*args, **kwargs)
+
+    subprocess.Popen = PopenSinConsola
+
+
+_ocultar_consolas_subprocesos()
 
 # Importar módulos desde la carpeta modules
 import modules.bbdd_publica as bbdd_publica
