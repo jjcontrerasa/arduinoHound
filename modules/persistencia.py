@@ -12,8 +12,8 @@ BOARDS_JSON_FILE = user_data_path("boards.json")
 BOARDS_SQL_CACHE = user_data_path("boards.sql")
 BOARDS_SQL_HASH = user_data_path("boards.sql.sha256")
 BOARDS_SQL_URL = (
-    "https://raw.githubusercontent.com/jjcontrerasa/BD_ArduinoHound/"
-    "main/boards.sql"
+    "https://raw.githubusercontent.com/jjcontrerasa/arduinoHound/"
+    "main/data/boards.sql"
 )
 _CATALOGO_SINCRONIZADO = False
 PLACAS_FILE = user_data_path("placas.json")

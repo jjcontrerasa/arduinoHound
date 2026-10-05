@@ -1,0 +1,4 @@
+{
+    "FTDI": "arduino:avr:uno",
+    "CH340": "arduino:avr:uno"
+}
