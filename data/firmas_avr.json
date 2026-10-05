@@ -1,0 +1,23 @@
+[
+  {"firma": "0x1E950F", "placa": "Arduino UNO Rev3", "microcontrolador": "ATmega328P", "fqbn": "arduino:avr:uno"},
+  {"firma": "0x1E950F", "placa": "Arduino Nano (ATmega328P)", "microcontrolador": "ATmega328P", "fqbn": "arduino:avr:nano"},
+  {"firma": "0x1E950F", "placa": "Arduino Nano (Old Bootloader)", "microcontrolador": "ATmega328P", "fqbn": "arduino:avr:nano:cpu=atmega328old"},
+  {"firma": "0x1E9801", "placa": "Arduino Mega 2560 Rev3", "microcontrolador": "ATmega2560", "fqbn": "arduino:avr:mega"},
+  {"firma": "0x1E9587", "placa": "Arduino Leonardo", "microcontrolador": "ATmega32u4", "fqbn": "arduino:avr:leonardo"},
+  {"firma": "0x1E9587", "placa": "Arduino Micro", "microcontrolador": "ATmega32u4", "fqbn": "arduino:avr:micro"},
+  {"firma": "0x1E9587", "placa": "Arduino Esplora", "microcontrolador": "ATmega32u4", "fqbn": "arduino:avr:esplora"},
+  {"firma": "0x1E9587", "placa": "Arduino Yun", "microcontrolador": "ATmega32u4 + SoC Linux", "fqbn": "arduino:avr:yun"},
+  {"firma": "0x1E9587", "placa": "Arduino Robot Control", "microcontrolador": "ATmega32u4", "fqbn": "arduino:avr:robotControl"},
+  {"firma": "0x1E9587", "placa": "Arduino Robot Motor", "microcontrolador": "ATmega32u4", "fqbn": "arduino:avr:robotMotor"},
+  {"firma": "0x1E9587", "placa": "Arduino LilyPad USB", "microcontrolador": "ATmega32u4", "fqbn": "arduino:avr:lilypadusb"},
+  {"firma": "0x1E950F", "placa": "Arduino LilyPad (ATmega328P)", "microcontrolador": "ATmega328P", "fqbn": "arduino:avr:lilypad"},
+  {"firma": "0x1E950F", "placa": "Arduino Pro Mini (ATmega328P)", "microcontrolador": "ATmega328P", "fqbn": "arduino:avr:pro"},
+  {"firma": "0x1E950F", "placa": "Arduino Pro (ATmega328P)", "microcontrolador": "ATmega328P", "fqbn": "arduino:avr:pro"},
+  {"firma": "0x1E950F", "placa": "Arduino Fio", "microcontrolador": "ATmega328P", "fqbn": "arduino:avr:fio"},
+  {"firma": "0x1E9406", "placa": "Arduino Duemilanove", "microcontrolador": "ATmega168", "fqbn": "arduino:avr:diecimila"},
+  {"firma": "0x1E9406", "placa": "Arduino Diecimila", "microcontrolador": "ATmega168", "fqbn": "arduino:avr:diecimila"},
+  {"firma": "0x1E9307", "placa": "Arduino NG or older", "microcontrolador": "ATmega8", "fqbn": "arduino:avr:atmega8"},
+  {"firma": "0x1E9406", "placa": "Arduino NG or older", "microcontrolador": "ATmega168", "fqbn": "arduino:avr:diecimila"},
+  {"firma": "0x1E950F", "placa": "Arduino BT", "microcontrolador": "ATmega328P", "fqbn": "arduino:avr:bt"},
+  {"firma": "0x1E930B", "placa": "Arduino Gemma", "microcontrolador": "ATtiny85", "fqbn": "arduino:avr:gemma"}
+]
