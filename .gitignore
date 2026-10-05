@@ -9,3 +9,19 @@ core/
 
 # Carpeta temporal sin usar
 Nueva carpeta/
+
+# Datos privados del usuario e indices pesados de arduino-cli
+reportes.json
+puertos.json
+package_index.json
+library_index.json
+library_index.json.sig
+package_index.json.sig
+
+# Datos del sistema/usuario (solo los catalogos de data/ son publicos)
+/placas.json
+/boards.json
+/dispositivos_i2c.json
+inventory.yaml
+.estado_bbdd_publica.json
+boards.sqlite3

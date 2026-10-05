@@ -14,13 +14,25 @@ PUBLIC_REPO_PATH = PROJECT_PATH.parent / "ArduinoHound_BD_Publica"
 ESTADO_FILE = user_data_path(".estado_bbdd_publica.json")
 
 IGNORAR_DIRS = {"packages", "staging", "tmp", "core", "Nueva carpeta", "__pycache__", ".git"}
+# Datos privados del usuario e indices pesados de arduino-cli: nunca se versionan.
+IGNORAR_ARCHIVOS = {
+    "reportes.json",
+    "puertos.json",
+    "dispositivos_i2c.cache.json",
+    "package_index.json",
+    "library_index.json",
+    ".estado_bbdd_publica.json",
+}
 
 
 def _listar_json_repositorio():
     archivos = []
     for ruta in PROJECT_PATH.rglob("*.json"):
         partes = ruta.relative_to(PROJECT_PATH).parts[:-1]
-        if any(parte in IGNORAR_DIRS for parte in partes):
+        if any(parte in IGNORAR_DIRS for parte in partes) or ruta.name in IGNORAR_ARCHIVOS:
+            continue
+        # Solo los catalogos de data/ son publicos; los JSON de la raiz son del usuario.
+        if not partes or partes[0] != "data":
             continue
         archivos.append(ruta)
     return sorted(archivos)

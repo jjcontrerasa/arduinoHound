@@ -4,11 +4,13 @@ import threading
 import webbrowser
 import re
 import json
+import csv
+from pathlib import Path
 from datetime import datetime
-from tkinter import filedialog, ttk
+from tkinter import filedialog, messagebox, ttk
 from .deteccion_puertos import obtener_puertos, parsear_puertos
 from .estado_ui import BarCarga, IndicadorEstado
-from .persistencia import cargar_boards, cargar_i2c, cargar_json, cargar_placas
+from .persistencia import cargar_boards, cargar_i2c, cargar_json, cargar_placas, cargar_spi
 from .rastreo_serial import leer_datos
 from .rutas import configurar_ventana, resource_path, user_data_path
 
@@ -184,9 +186,7 @@ def crear_panel(root):
     rastreo_hilo = [None]
     version_escaneo_puertos = [0]
     catalogo_i2c = cargar_i2c()
-    catalogo_spi_json = cargar_json(
-        resource_path("data", "dispositivos_spi.json"), {"spi_devices": []}
-    )
+    catalogo_spi_json = cargar_spi()
     catalogo_spi = catalogo_spi_json.get("spi_devices", [])
     reportes_file = user_data_path("reportes.json")
 
@@ -289,9 +289,6 @@ def crear_panel(root):
     tabla_i2c.column("descripcion", width=180, minwidth=140, anchor="w", stretch=True)
     tabla_i2c.pack(side="left", fill="x", expand=True)
 
-    tabla_scroll = ttk.Scrollbar(frame_i2c, orient="vertical", command=tabla_i2c.yview)
-    tabla_scroll.pack(side="right", fill="y")
-    tabla_i2c.configure(yscrollcommand=tabla_scroll.set)
 
     frame_uart = tk.Frame(frame_tablas, bg="black")
     frame_uart.pack(fill="x", pady=(0, 5))
@@ -314,9 +311,6 @@ def crear_panel(root):
     tabla_uart.column("nombre", width=190, minwidth=130, anchor="w", stretch=True)
     tabla_uart.pack(side="left", fill="x", expand=True)
 
-    tabla_uart_scroll = ttk.Scrollbar(frame_uart, orient="vertical", command=tabla_uart.yview)
-    tabla_uart_scroll.pack(side="right", fill="y")
-    tabla_uart.configure(yscrollcommand=tabla_uart_scroll.set)
 
     frame_spi = tk.Frame(frame_tablas, bg="black")
     frame_spi.pack(fill="x")
@@ -341,9 +335,6 @@ def crear_panel(root):
     tabla_spi.column("descripcion", width=170, minwidth=120, anchor="w", stretch=True)
     tabla_spi.pack(side="left", fill="x", expand=True)
 
-    tabla_spi_scroll = ttk.Scrollbar(frame_spi, orient="vertical", command=tabla_spi.yview)
-    tabla_spi_scroll.pack(side="right", fill="y")
-    tabla_spi.configure(yscrollcommand=tabla_spi_scroll.set)
 
     salida = tk.Text(frame_diagnostico, bg="black", fg="white", height=10)
     salida.pack(fill="both", expand=True)
@@ -558,7 +549,7 @@ def crear_panel(root):
             etiqueta_total.config(text=f"{total} dispositivos encontrados.")
 
         marco_tabla_i2c = tk.Frame(ventana, bg="black")
-        marco_tabla_i2c.pack(fill="x", expand=False, padx=0, pady=(12, 0))
+        marco_tabla_i2c.pack(fill="x", expand=False, padx=0, pady=(12, 20))
         for columna in range(3):
             marco_tabla_i2c.grid_columnconfigure(columna, weight=1, uniform="reporte_protocolos")
 
@@ -598,9 +589,10 @@ def crear_panel(root):
             anchor="w",
         ).grid(row=1, column=1, sticky="ew", pady=(0, 4))
 
-        cuerpo_tabla = tk.Frame(tabla_i2c, bg="black", height=34)
+        cuerpo_tabla = tk.Frame(tabla_i2c, bg="black", height=133)
         cuerpo_tabla.grid(row=2, column=0, columnspan=2, sticky="nsew")
         cuerpo_tabla.grid_propagate(False)
+        cuerpo_tabla.pack_propagate(False)
         tabla_i2c.grid_rowconfigure(2, weight=1)
         lienzo_i2c = tk.Canvas(cuerpo_tabla, bg="black", highlightthickness=0)
         lienzo_i2c.pack(side="left", fill="both", expand=True)
@@ -661,9 +653,10 @@ def crear_panel(root):
 
             encabezados = tk.Frame(marco, bg="black")
             encabezados.grid(row=1, column=0, sticky="ew")
-            filas = tk.Frame(marco, bg="black", height=34)
+            filas = tk.Frame(marco, bg="black", height=133)
             filas.grid(row=2, column=0, sticky="ew")
             filas.grid_propagate(False)
+            filas.pack_propagate(False)
             lienzo = tk.Canvas(filas, bg="black", highlightthickness=0)
             lienzo.pack(fill="both", expand=True)
             filas_datos = tk.Frame(lienzo, bg="black")
@@ -960,6 +953,56 @@ def crear_panel(root):
 
         llenar_i2c_reporte()
 
+        def limitar_texto(maximo):
+            return (ventana.register(lambda texto: len(texto) <= maximo), "%P")
+
+        frame_extra = tk.Frame(ventana, bg="black")
+        frame_extra.pack(fill="x", padx=20, pady=(0, 10))
+        tk.Label(
+            frame_extra,
+            text=(
+                "Agregar otros dispositivos no detectados en el escaneo que tengan "
+                "funcionalidad en la medici?n de los parametros (Escribe los modelos "
+                "o descripci?n separados por comas):"
+            ),
+            fg="white",
+            bg="black",
+            font=fuente_clave,
+            anchor="w",
+            justify="left",
+            wraplength=990,
+        ).pack(fill="x")
+        otros_var = tk.StringVar()
+        tk.Entry(
+            frame_extra,
+            textvariable=otros_var,
+            validate="key",
+            validatecommand=limitar_texto(50),
+            bg="#202020",
+            fg=color_valor,
+            insertbackground=color_valor,
+            font=fuente_valor,
+        ).pack(fill="x", pady=(2, 8))
+        tk.Label(
+            frame_extra,
+            text="Notas adicionales:",
+            fg="white",
+            bg="black",
+            font=fuente_clave,
+            anchor="w",
+        ).pack(fill="x")
+        nota_var = tk.StringVar()
+        tk.Entry(
+            frame_extra,
+            textvariable=nota_var,
+            validate="key",
+            validatecommand=limitar_texto(150),
+            bg="#202020",
+            fg=color_valor,
+            insertbackground=color_valor,
+            font=fuente_valor,
+        ).pack(fill="x", pady=(2, 0))
+
         frame_reporte = tk.Frame(ventana, bg="black")
         frame_reporte.pack(padx=18, pady=(0, 18))
 
@@ -990,25 +1033,27 @@ def crear_panel(root):
             configurar_ventana(ventana_registros)
             ventana_registros.after(10, configurar_ventana, ventana_registros)
             ventana_registros.configure(bg="black")
-            ventana_registros.geometry("760x480")
+            ventana_registros.geometry("820x480")
             ventana_registros.resizable(False, False)
             ventana_registros.transient(ventana)
 
             lista_registros = ttk.Treeview(
                 ventana_registros,
-                columns=("fecha", "hora", "equipo", "placa"),
+                columns=("fecha", "hora", "equipo", "placa", "otros", "nota"),
                 show="headings",
                 height=8,
                 style="Reporte.Treeview",
             )
             for clave, encabezado, ancho in (
-                ("fecha", "Fecha", 90),
-                ("hora", "Hora", 80),
-                ("equipo", "Equipo", 210),
-                ("placa", "Placa", 280),
+                ("fecha", "Fecha", 80),
+                ("hora", "Hora", 65),
+                ("equipo", "Equipo", 140),
+                ("placa", "Placa", 110),
+                ("otros", "Otros", 150),
+                ("nota", "Nota", 220),
             ):
                 lista_registros.heading(clave, text=encabezado)
-                lista_registros.column(clave, width=ancho, anchor="w", stretch=True)
+                lista_registros.column(clave, width=ancho, minwidth=40, anchor="w", stretch=False)
             lista_registros.pack(fill="x", padx=16, pady=(16, 8))
 
             detalles_registro = tk.Text(
@@ -1036,6 +1081,8 @@ def crear_panel(root):
                         registro.get("hora", "-"),
                         registro.get("nombre_equipo", "-"),
                         registro.get("board", "-"),
+                        registro.get("otros", ""),
+                        registro.get("nota", ""),
                     ),
                 )
 
@@ -1055,6 +1102,8 @@ def crear_panel(root):
         def guardar_reporte():
             registro = dict(reporte_actual[0])
             registro["nombre_equipo"] = equipo_var.get().strip()
+            registro["otros"] = otros_var.get().strip()
+            registro["nota"] = nota_var.get().strip()
             registro["fecha"] = datetime.now().strftime("%d/%m/%Y")
             registro["hora"] = datetime.now().strftime("%H:%M:%S")
             try:
@@ -1075,23 +1124,112 @@ def crear_panel(root):
                 parent=ventana,
             )
 
+        def nombre_i2c_registro(registro):
+            seleccionados = registro.get("i2c_seleccion", {})
+            nombres = []
+            for dispositivo in registro.get("i2c", []):
+                direccion = dispositivo.get("direccion", "")
+                seleccion = seleccionados.get(direccion, {})
+                nombre = (
+                    seleccion.get("dispositivo", "")
+                    if isinstance(seleccion, dict)
+                    else str(seleccion or "")
+                )
+                if not nombre:
+                    opciones = registro.get("i2c_opciones", {}).get(direccion, [])
+                    nombre = opciones[0].get("dispositivo", "") if opciones else ""
+                nombres.append(f"{direccion} {nombre or 'No identificado'}".strip())
+            return ", ".join(nombres)
+
+        def descargar_reporte():
+            try:
+                with reportes_file.open("r", encoding="utf-8") as archivo:
+                    registros = json.load(archivo)
+            except (OSError, json.JSONDecodeError):
+                registros = []
+            if isinstance(registros, dict):
+                registros = [registros]
+            registros = [item for item in registros if isinstance(item, dict)]
+            if not registros:
+                messagebox.showinfo(
+                    "Descargar reporte", "No hay reportes guardados.", parent=ventana
+                )
+                return
+            ahora_descarga = datetime.now()
+            nombre_archivo = (
+                f"arduinohound_{ahora_descarga:%d%m%Y}"
+                f"{ahora_descarga.hour}{ahora_descarga:%M}.csv"
+            )
+            carpeta_descargas = Path.home() / "Downloads"
+            destino = filedialog.asksaveasfilename(
+                parent=ventana,
+                title="Descargar reporte",
+                defaultextension=".csv",
+                initialdir=str(carpeta_descargas) if carpeta_descargas.is_dir() else None,
+                initialfile=nombre_archivo,
+                filetypes=[("Archivo CSV (UTF-8)", "*.csv")],
+            )
+            if not destino:
+                return
+            try:
+                with open(destino, "w", encoding="utf-8-sig", newline="") as archivo:
+                    escritor = csv.writer(archivo)
+                    escritor.writerow([
+                        "Fecha", "Hora", "Equipo", "Placa", "FQBN",
+                        "I2C", "UART", "SPI", "Otros", "Nota",
+                    ])
+                    for registro in registros:
+                        escritor.writerow([
+                            registro.get("fecha", ""),
+                            registro.get("hora", ""),
+                            registro.get("nombre_equipo", ""),
+                            registro.get("board", ""),
+                            registro.get("fqbn", ""),
+                            nombre_i2c_registro(registro),
+                            registro.get("uart", ""),
+                            registro.get("spi", ""),
+                            registro.get("otros", ""),
+                            registro.get("nota", ""),
+                        ])
+            except OSError as error:
+                messagebox.showerror(
+                    "Descargar reporte", f"No se pudo guardar el archivo:\n{error}", parent=ventana
+                )
+                return
+            messagebox.showinfo(
+                "Descargar reporte", "El archivo CSV se gener? correctamente.", parent=ventana
+            )
+
         tk.Button(
             frame_reporte,
             text="Ver registros",
             command=ver_registros,
             bg="black", fg="white", highlightbackground="OliveDrab", highlightthickness=1,
+            font=("Arial", 12, "bold"),
         ).pack(side="left", padx=5)
 
         boton_guardar = tk.Button(
             frame_reporte,
-            text="Generar reporte",
+            text="Cargar registro",
             command=guardar_reporte,
             bg="black",
             fg="white",
             highlightbackground="OliveDrab",
             highlightthickness=1,
+            font=("Arial", 12, "bold"),
         )
         boton_guardar.pack(side="left", padx=5)
+
+        tk.Button(
+            frame_reporte,
+            text="Descargar reporte",
+            command=descargar_reporte,
+            bg="black",
+            fg="white",
+            highlightbackground="OliveDrab",
+            highlightthickness=1,
+            font=("Arial", 12, "bold"),
+        ).pack(side="left", padx=5)
 
         boton_salir = tk.Button(
             frame_reporte,
@@ -1101,10 +1239,11 @@ def crear_panel(root):
             fg="white",
             highlightbackground="OliveDrab",
             highlightthickness=1,
+            font=("Arial", 12, "bold"),
         )
         boton_salir.pack(side="left", padx=5)
-        boton_salir.configure(default="active")
-        ventana.after_idle(boton_salir.focus_set)
+        boton_guardar.configure(default="active")
+        ventana.after_idle(boton_guardar.focus_set)
 
     boton_reporte = tk.Button(
         frame_btn,

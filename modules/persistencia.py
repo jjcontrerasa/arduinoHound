@@ -25,6 +25,13 @@ I2C_URL = (
     "main/data/dispositivos_i2c.json"
 )
 PUERTOS_FILE = user_data_path("puertos.json")
+CATALOGOS_URL_BASE = (
+    "https://raw.githubusercontent.com/jjcontrerasa/arduinoHound/"
+    "main/data/"
+)
+SPI_FILE = user_data_path("dispositivos_spi.json")
+FIRMAS_AVR_FILE = user_data_path("firmas_avr.json")
+CATALOGO_PLACAS_FILE = user_data_path("catalogo_placas.json")
 _I2C_SINCRONIZADO = False
 
 
@@ -188,3 +195,57 @@ def guardar_puerto_default(puerto):
 def obtener_puerto_default():
     datos = cargar_puertos_guardados()
     return datos.get("default", "")
+
+
+# Catalogos publicos de solo lectura: se descargan del repositorio, se guardan en
+# la carpeta de datos del usuario y, sin red, se usa la copia incluida en data/.
+_CATALOGOS_REMOTOS = {
+    "dispositivos_spi.json": SPI_FILE,
+    "firmas_avr.json": FIRMAS_AVR_FILE,
+    "placas.json": CATALOGO_PLACAS_FILE,
+}
+_CATALOGOS_SINCRONIZADOS = set()
+_RED_DISPONIBLE = [True]
+
+
+def _sincronizar_catalogo(nombre):
+    if nombre in _CATALOGOS_SINCRONIZADOS or not _RED_DISPONIBLE[0]:
+        return False
+    _CATALOGOS_SINCRONIZADOS.add(nombre)
+    destino = _CATALOGOS_REMOTOS[nombre]
+    try:
+        request = Request(CATALOGOS_URL_BASE + nombre, headers={"User-Agent": "ArduinoHound/1.0"})
+        with urlopen(request, timeout=3) as response:
+            remoto = response.read().decode("utf-8")
+        datos = json.loads(remoto)
+    except (OSError, URLError, UnicodeDecodeError, json.JSONDecodeError):
+        _RED_DISPONIBLE[0] = False
+        return False
+    if not isinstance(datos, (dict, list)) or not datos:
+        return False
+    try:
+        guardar_json(destino, datos)
+    except OSError:
+        return False
+    return True
+
+
+def cargar_catalogo(nombre, default):
+    _sincronizar_catalogo(nombre)
+    destino = _CATALOGOS_REMOTOS[nombre]
+    if not destino.exists():
+        respaldo = cargar_json(resource_path("data", nombre), None)
+        return respaldo if respaldo else default
+    return cargar_json(destino, default)
+
+
+def cargar_spi():
+    return cargar_catalogo("dispositivos_spi.json", {"spi_devices": []})
+
+
+def cargar_firmas_avr():
+    return cargar_catalogo("firmas_avr.json", {})
+
+
+def cargar_catalogo_placas():
+    return cargar_catalogo("placas.json", {})

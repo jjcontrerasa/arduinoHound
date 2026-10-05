@@ -524,8 +524,31 @@ def crear_panel(root):
 
     list_frame = tk.Frame(main, bg="black")
     list_frame.pack(fill="x", pady=5)
-    board_combo = ttk.Combobox(list_frame, textvariable=placa_var, state="readonly", width=30)
-    board_combo.pack(fill="x")
+    estilo_combo = ttk.Style(main)
+    estilo_combo.configure(
+        "Placas.TCombobox",
+        fieldbackground="black",
+        background="black",
+        foreground="yellow1",
+        arrowcolor="yellow1",
+        bordercolor="white",
+        lightcolor="black",
+        darkcolor="black",
+    )
+    estilo_combo.map(
+        "Placas.TCombobox",
+        fieldbackground=[("readonly", "black")],
+        background=[("readonly", "black")],
+        foreground=[("readonly", "yellow1")],
+        selectbackground=[("readonly", "black")],
+        selectforeground=[("readonly", "yellow1")],
+    )
+    main.option_add("*TCombobox*Listbox.background", "black")
+    main.option_add("*TCombobox*Listbox.foreground", "yellow1")
+    main.option_add("*TCombobox*Listbox.selectBackground", "#333333")
+    main.option_add("*TCombobox*Listbox.selectForeground", "yellow1")
+    board_combo = ttk.Combobox(list_frame, textvariable=placa_var, state="readonly", width=26, style="Placas.TCombobox")
+    board_combo.pack()
     board_combo["values"] = sorted(arduino_boards)
     board_combo.bind("<<ComboboxSelected>>", on_placa_seleccionada)
 
