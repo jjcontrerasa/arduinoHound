@@ -25,3 +25,7 @@ package_index.json.sig
 inventory.yaml
 .estado_bbdd_publica.json
 boards.sqlite3
+
+dist/
+build/
+installer/

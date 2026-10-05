@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import json
 import sqlite3
 from urllib.error import URLError
@@ -29,6 +30,7 @@ CATALOGOS_URL_BASE = (
     "https://raw.githubusercontent.com/jjcontrerasa/arduinoHound/"
     "main/data/"
 )
+MANIFIESTO_URL = CATALOGOS_URL_BASE + "manifiesto.json"
 SPI_FILE = user_data_path("dispositivos_spi.json")
 FIRMAS_AVR_FILE = user_data_path("firmas_avr.json")
 CATALOGO_PLACAS_FILE = user_data_path("catalogo_placas.json")
@@ -58,6 +60,36 @@ def _leer_texto(path):
         return ""
 
 
+_MANIFIESTO = [None]
+
+
+def _hash_texto(texto):
+    return hashlib.sha256(texto.replace("\r\n", "\n").encode("utf-8")).hexdigest()
+
+
+def _obtener_manifiesto():
+    """Hashes SHA-256 publicados en el repositorio; vacio si no se pudo obtener."""
+    if _MANIFIESTO[0] is None:
+        archivos = {}
+        try:
+            request = Request(MANIFIESTO_URL, headers={"User-Agent": "ArduinoHound/1.0"})
+            with urlopen(request, timeout=5) as response:
+                datos = json.loads(response.read().decode("utf-8"))
+            candidatos = datos.get("archivos") if isinstance(datos, dict) else None
+            if isinstance(candidatos, dict):
+                archivos = candidatos
+        except (OSError, URLError, UnicodeDecodeError, json.JSONDecodeError):
+            archivos = {}
+        _MANIFIESTO[0] = archivos
+    return _MANIFIESTO[0]
+
+
+def _contenido_verificado(nombre, texto):
+    """Solo se acepta una descarga cuyo hash coincide con el del manifiesto."""
+    esperado = str(_obtener_manifiesto().get(nombre, "")).strip().lower()
+    return bool(esperado) and hmac.compare_digest(esperado, _hash_texto(texto))
+
+
 def _boards_desde_sql(script):
     with sqlite3.connect(":memory:") as connection:
         connection.executescript(script)
@@ -84,6 +116,9 @@ def _actualizar_catalogo_remoto():
         with urlopen(request, timeout=5) as response:
             remoto = response.read().decode("utf-8")
     except (OSError, URLError, UnicodeDecodeError):
+        return False
+
+    if not _contenido_verificado("boards.sql", remoto):
         return False
 
     hash_remoto = hashlib.sha256(remoto.encode("utf-8")).hexdigest()
@@ -138,6 +173,9 @@ def _actualizar_catalogo_i2c():
         if not isinstance(registros, list):
             return False
     except (OSError, URLError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+
+    if not _contenido_verificado("dispositivos_i2c.json", remoto):
         return False
 
     hash_remoto = hashlib.sha256(remoto.encode("utf-8")).hexdigest()
@@ -222,6 +260,8 @@ def _sincronizar_catalogo(nombre):
         _RED_DISPONIBLE[0] = False
         return False
     if not isinstance(datos, (dict, list)) or not datos:
+        return False
+    if not _contenido_verificado(nombre, remoto):
         return False
     try:
         guardar_json(destino, datos)
