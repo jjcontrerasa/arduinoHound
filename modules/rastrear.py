@@ -1006,6 +1006,39 @@ def crear_panel(root):
         frame_reporte = tk.Frame(ventana, bg="black")
         frame_reporte.pack(padx=18, pady=(0, 18))
 
+        def nombres_i2c_lista(registro):
+            seleccionados = registro.get("i2c_seleccion", {})
+            nombres = []
+            for dispositivo in registro.get("i2c", []):
+                direccion = dispositivo.get("direccion", "")
+                seleccion = seleccionados.get(direccion, {})
+                nombre = (
+                    seleccion.get("dispositivo", "")
+                    if isinstance(seleccion, dict)
+                    else str(seleccion or "")
+                )
+                if not nombre:
+                    opciones = registro.get("i2c_opciones", {}).get(direccion, [])
+                    nombre = opciones[0].get("dispositivo", "") if opciones else ""
+                nombres.append(str(nombre or "No identificado").strip())
+            return ", ".join(nombres)
+
+        def nombres_uart_lista(registro):
+            vacios = {"", "-", "none", "ninguno"}
+            return ", ".join(
+                modulo.split("(", 1)[0].strip()
+                for modulo in str(registro.get("uart", "")).split(" | ")
+                if modulo.strip().lower() not in vacios
+            )
+
+        def nombres_spi_lista(registro):
+            vacios = {"", "-", "none", "ninguno"}
+            nombres = (
+                modulo.split(";", 1)[0].strip()
+                for modulo in str(registro.get("spi", "")).split(",")
+            )
+            return ", ".join(nombre for nombre in nombres if nombre.lower() not in vacios)
+
         def ver_registros():
             try:
                 with reportes_file.open("r", encoding="utf-8") as archivo:
@@ -1033,13 +1066,18 @@ def crear_panel(root):
             configurar_ventana(ventana_registros)
             ventana_registros.after(10, configurar_ventana, ventana_registros)
             ventana_registros.configure(bg="black")
-            ventana_registros.geometry("820x480")
+            ancho_registros, alto_registros = 1060, 448
+            ventana_registros.geometry(
+                f"{ancho_registros}x{alto_registros}"
+                f"+{(ventana_registros.winfo_screenwidth() - ancho_registros) // 2}"
+                f"+{(ventana_registros.winfo_screenheight() - alto_registros) // 2}"
+            )
             ventana_registros.resizable(False, False)
             ventana_registros.transient(ventana)
 
             lista_registros = ttk.Treeview(
                 ventana_registros,
-                columns=("fecha", "hora", "equipo", "placa", "otros", "nota"),
+                columns=("fecha", "hora", "equipo", "placa", "i2c", "uart", "spi", "otros", "nota"),
                 show="headings",
                 height=8,
                 style="Reporte.Treeview",
@@ -1047,14 +1085,40 @@ def crear_panel(root):
             for clave, encabezado, ancho in (
                 ("fecha", "Fecha", 80),
                 ("hora", "Hora", 65),
-                ("equipo", "Equipo", 140),
-                ("placa", "Placa", 110),
-                ("otros", "Otros", 150),
-                ("nota", "Nota", 220),
+                ("equipo", "Equipo", 120),
+                ("placa", "Placa", 100),
+                ("i2c", "I2C", 130),
+                ("uart", "UART", 110),
+                ("spi", "SPI", 110),
+                ("otros", "Otros", 110),
+                ("nota", "Nota", 150),
             ):
                 lista_registros.heading(clave, text=encabezado)
                 lista_registros.column(clave, width=ancho, minwidth=40, anchor="w", stretch=False)
-            lista_registros.pack(fill="x", padx=16, pady=(16, 8))
+            lista_registros.pack(padx=16, pady=(16, 0))
+
+            icono_salir_registros = None
+            ruta_icono_salir = resource_path("assets", "ico_Salir.png")
+            try:
+                from PIL import Image, ImageTk
+                icono_salir_registros = ImageTk.PhotoImage(
+                    Image.open(ruta_icono_salir).convert("RGBA").resize((60, 60), Image.LANCZOS)
+                )
+            except Exception:
+                icono_salir_registros = None
+            boton_cerrar_registros = tk.Button(
+                ventana_registros,
+                bg="black", activebackground="black",
+                bd=0, highlightthickness=0, relief="flat", cursor="hand2",
+                command=ventana_registros.destroy,
+                **(
+                    {"image": icono_salir_registros}
+                    if icono_salir_registros
+                    else {"text": "Salir", "fg": "white"}
+                ),
+            )
+            boton_cerrar_registros.image = icono_salir_registros
+            boton_cerrar_registros.pack(pady=(8, 8))
 
             detalles_registro = tk.Text(
                 ventana_registros,
@@ -1081,6 +1145,9 @@ def crear_panel(root):
                         registro.get("hora", "-"),
                         registro.get("nombre_equipo", "-"),
                         registro.get("board", "-"),
+                        nombres_i2c_lista(registro),
+                        nombres_uart_lista(registro),
+                        nombres_spi_lista(registro),
                         registro.get("otros", ""),
                         registro.get("nota", ""),
                     ),
@@ -1231,10 +1298,57 @@ def crear_panel(root):
             font=("Arial", 12, "bold"),
         ).pack(side="left", padx=5)
 
+        def confirmar_salida():
+            if str(boton_guardar["state"]) == "disabled":
+                ventana.destroy()
+                return
+            aviso = tk.Toplevel(ventana)
+            aviso.title("Advertencia")
+            configurar_ventana(aviso)
+            aviso.after(10, configurar_ventana, aviso)
+            aviso.configure(bg="black")
+            aviso.resizable(False, False)
+            aviso.transient(ventana)
+            contenido = tk.Frame(aviso, bg="black")
+            contenido.pack(padx=24, pady=20)
+            tk.Label(
+                contenido,
+                text="Aún no guarda el registro actual.\n¿Esta seguro que desea salir?",
+                fg="white",
+                bg="black",
+                justify="center",
+            ).pack(fill="x")
+            botones = tk.Frame(contenido, bg="black")
+            botones.pack(pady=(18, 0))
+
+            def aceptar():
+                aviso.destroy()
+                ventana.destroy()
+
+            boton_cancelar = tk.Button(
+                botones, text="Cancelar", command=aviso.destroy,
+                bg="black", fg="white", highlightbackground="OliveDrab",
+                highlightthickness=1,
+            )
+            boton_cancelar.pack(side="left", padx=5)
+            tk.Button(
+                botones, text="Aceptar", command=aceptar,
+                bg="black", fg="white", highlightbackground="OliveDrab",
+                highlightthickness=1,
+            ).pack(side="left", padx=5)
+            aviso.bind("<Escape>", lambda _event: aviso.destroy())
+            aviso.update_idletasks()
+            aviso.geometry(
+                f"+{ventana.winfo_rootx() + (ventana.winfo_width() - aviso.winfo_width()) // 2}"
+                f"+{ventana.winfo_rooty() + (ventana.winfo_height() - aviso.winfo_height()) // 2}"
+            )
+            aviso.grab_set()
+            aviso.after_idle(boton_cancelar.focus_set)
+
         boton_salir = tk.Button(
             frame_reporte,
-            text="Salir sin guardar",
-            command=ventana.destroy,
+            text="Salir",
+            command=confirmar_salida,
             bg="black",
             fg="white",
             highlightbackground="OliveDrab",
