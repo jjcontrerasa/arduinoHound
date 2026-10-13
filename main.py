@@ -32,17 +32,20 @@ import modules.bbdd_publica as bbdd_publica
 import modules.cargarSketch as cargarSketch
 import modules.puertos as puertos
 import modules.rastrear as rastrear
+import modules.rf_hound as rf_hound
 
 
 # ---------------- CONFIG ----------------
 BG_COLOR = "black"
 FRAME_BORDER_COLOR = "white"
 COLOR_AZUL = "#3399FF"
+COLOR_RF_VERDE = "green2"
 TITLE = "ArduinoHound V2"
 HEADER_HEIGHT = 100
 FOOTER_HEIGHT = 60
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 ICON_PATH = ASSETS_DIR / "IconoAHound.ico"
+ICON_RF_PATH = ASSETS_DIR / "RFHound.png"
 TEXTO_DESARROLLADORES = (
     "Instituto Politécnico Nacional - Escuela Superior de Ingeniería Mecánica y Eléctrica, Unidad Zacatenco\n"
     "Software desarrollado por: Juan José Contreras Arteaga\n"
@@ -51,7 +54,7 @@ TEXTO_DESARROLLADORES = (
 )
 LOGO_WIDTH = 70
 LOGO_GAP = 60
-LOGOS_HEADER = ["ipn_logo.png", "esime_logo.png", "HC26_logo.png"]
+LOGOS_HEADER = ["ipn_logo.png", "esime_logo.png", "HC26_logo_2.png"]
 TAMANIO_ICONO_ACCION = 40
 ICONO_ACTUALIZAR_BBDD_PATH = ASSETS_DIR / "ico_ActualizarBBDD.png"
 ICONO_SALIR_PATH = ASSETS_DIR / "ico_Salir.png"
@@ -86,16 +89,162 @@ root.after(10, _activar_modo_oscuro)
 # Tamaño inicial
 root.geometry("1200x720")
 
-# Grid 2 columnas: cargar sketch 35% y rastreo 65%
-root.columnconfigure(0, weight=7)
-root.columnconfigure(1, weight=13)
-root.rowconfigure(0, weight=0)
-root.rowconfigure(1, weight=1)
-root.rowconfigure(2, weight=0)
+# Grid de la ventana principal
+root.columnconfigure(0, weight=1)
+root.rowconfigure(0, weight=0)  # Barra de pestañas superior
+root.rowconfigure(1, weight=0)  # Encabezado
+root.rowconfigure(2, weight=1)  # Área de contenido según pestaña activa
+root.rowconfigure(3, weight=0)  # Pie de página
+
+# ---------------- BARRA DE PESTAÑAS SUPERIOR ----------------
+frame_tabs = tk.Frame(root, bg=BG_COLOR)
+frame_tabs.grid(row=0, column=0, sticky="ew", padx=15, pady=(6, 2))
+
+tabs_container = tk.Frame(frame_tabs, bg=BG_COLOR)
+tabs_container.pack(side="left")
+
+pestana_activa = ["arduino"]
+btn_tab_arduino = None
+btn_tab_rf = None
+label_titulo_header = None
+logo_izq_label = None
+logo_arduino_img = None
+logo_rf_img = None
+frame_main_content = None
+frame_rf_content = None
+
+
+def cambiar_pestana(nombre):
+    """Cambia entre la vista principal (Arduino Hound) y la vista secundaria (RF Hound)."""
+    if nombre == "arduino":
+        pestana_activa[0] = "arduino"
+        if frame_rf_content is not None:
+            frame_rf_content.grid_remove()
+        if frame_main_content is not None:
+            frame_main_content.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
+
+        if label_titulo_header is not None:
+            label_titulo_header.config(text="Arduino Hound", fg=COLOR_AZUL)
+        if logo_izq_label is not None and logo_arduino_img is not None:
+            logo_izq_label.config(image=logo_arduino_img)
+            logo_izq_label.image = logo_arduino_img
+
+        if btn_tab_arduino is not None:
+            btn_tab_arduino.config(
+                bg="#142132",
+                fg=COLOR_AZUL,
+                highlightbackground=COLOR_AZUL,
+                activebackground="#1e2f47",
+                activeforeground=COLOR_AZUL,
+            )
+        if btn_tab_rf is not None:
+            btn_tab_rf.config(
+                bg="#111111",
+                fg="gray65",
+                highlightbackground="#333333",
+                activebackground="#1e221e",
+                activeforeground=COLOR_RF_VERDE,
+            )
+    elif nombre == "rf":
+        pestana_activa[0] = "rf"
+        if frame_main_content is not None:
+            frame_main_content.grid_remove()
+        if frame_rf_content is not None:
+            frame_rf_content.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
+
+        if label_titulo_header is not None:
+            label_titulo_header.config(text="RF Hound", fg=COLOR_RF_VERDE)
+        if logo_izq_label is not None:
+            imagen_rf = logo_rf_img or logo_arduino_img
+            if imagen_rf is not None:
+                logo_izq_label.config(image=imagen_rf)
+                logo_izq_label.image = imagen_rf
+
+        if btn_tab_arduino is not None:
+            btn_tab_arduino.config(
+                bg="#111111",
+                fg="gray65",
+                highlightbackground="#333333",
+                activebackground="#1e2f47",
+                activeforeground=COLOR_AZUL,
+            )
+        if btn_tab_rf is not None:
+            btn_tab_rf.config(
+                bg="#102516",
+                fg=COLOR_RF_VERDE,
+                highlightbackground=COLOR_RF_VERDE,
+                activebackground="#14301d",
+                activeforeground=COLOR_RF_VERDE,
+            )
+
+
+btn_tab_arduino = tk.Button(
+    tabs_container,
+    text="  Arduino Hound  ",
+    font=("Arial", 10, "bold"),
+    bg="#142132",
+    fg=COLOR_AZUL,
+    activebackground="#1e2f47",
+    activeforeground=COLOR_AZUL,
+    bd=0,
+    highlightthickness=1,
+    highlightbackground=COLOR_AZUL,
+    relief="flat",
+    cursor="hand2",
+    padx=16,
+    pady=5,
+    command=lambda: cambiar_pestana("arduino"),
+)
+btn_tab_arduino.pack(side="left", padx=(0, 6))
+
+btn_tab_rf = tk.Button(
+    tabs_container,
+    text="  RF Hound  ",
+    font=("Arial", 10, "bold"),
+    bg="#111111",
+    fg="gray65",
+    activebackground="#1e221e",
+    activeforeground=COLOR_RF_VERDE,
+    bd=0,
+    highlightthickness=1,
+    highlightbackground="#333333",
+    relief="flat",
+    cursor="hand2",
+    padx=16,
+    pady=5,
+    command=lambda: cambiar_pestana("rf"),
+)
+btn_tab_rf.pack(side="left", padx=0)
+
+
+def _on_hover_arduino(_event):
+    if pestana_activa[0] != "arduino" and btn_tab_arduino is not None:
+        btn_tab_arduino.config(bg="#1a1a1a", fg="white")
+
+
+def _on_leave_arduino(_event):
+    if pestana_activa[0] != "arduino" and btn_tab_arduino is not None:
+        btn_tab_arduino.config(bg="#111111", fg="gray65")
+
+
+def _on_hover_rf(_event):
+    if pestana_activa[0] != "rf" and btn_tab_rf is not None:
+        btn_tab_rf.config(bg="#1a1a1a", fg="white")
+
+
+def _on_leave_rf(_event):
+    if pestana_activa[0] != "rf" and btn_tab_rf is not None:
+        btn_tab_rf.config(bg="#111111", fg="gray65")
+
+
+btn_tab_arduino.bind("<Enter>", _on_hover_arduino)
+btn_tab_arduino.bind("<Leave>", _on_leave_arduino)
+btn_tab_rf.bind("<Enter>", _on_hover_rf)
+btn_tab_rf.bind("<Leave>", _on_leave_rf)
 
 # ---------------- ENCABEZADO ----------------
 frame_header = tk.Frame(root, bg=BG_COLOR, height=HEADER_HEIGHT)
-frame_header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=15, pady=0)
+frame_header.grid(row=1, column=0, sticky="ew", padx=15, pady=0)
 frame_header.grid_propagate(False)  # conserva el alto fijo aunque no tenga contenido
 
 # Columnas laterales con el mismo peso para que la columna central quede centrada.
@@ -107,24 +256,35 @@ frame_header.grid_columnconfigure(2, weight=1)
 header_izq = tk.Frame(frame_header, bg=BG_COLOR)
 header_izq.grid(row=0, column=0, sticky="w", padx=10)
 
-if ImageTk and ICON_PATH.exists():
-    try:
-        logo_img = ImageTk.PhotoImage(Image.open(ICON_PATH).resize((90, 90)))
-        logo_label = tk.Label(header_izq, image=logo_img, bg=BG_COLOR)
-        logo_label.image = logo_img  # evita que el garbage collector lo elimine
-        logo_label.pack(side="left", padx=(0, 10))
-    except Exception:
-        pass
+if ImageTk:
+    if ICON_PATH.exists():
+        try:
+            logo_arduino_img = ImageTk.PhotoImage(Image.open(ICON_PATH).resize((90, 90)))
+        except Exception:
+            pass
+    if ICON_RF_PATH.exists():
+        try:
+            logo_rf_img = ImageTk.PhotoImage(Image.open(ICON_RF_PATH).resize((90, 90)))
+        except Exception:
+            pass
 
-tk.Label(
+imagen_inicial = logo_arduino_img or logo_rf_img
+if imagen_inicial is not None:
+    logo_izq_label = tk.Label(header_izq, image=imagen_inicial, bg=BG_COLOR)
+    logo_izq_label.image = imagen_inicial  # evita que el garbage collector lo elimine
+    logo_izq_label.pack(side="left", padx=(0, 10))
+
+label_titulo_header = tk.Label(
     header_izq, text="Arduino Hound", fg=COLOR_AZUL, bg=BG_COLOR,
     font=("Arial", 18, "bold")
-).pack(side="left")
+)
+label_titulo_header.pack(side="left")
 
 # Los tres logos institucionales quedan centrados en el encabezado, en el mismo orden.
 header_centro = tk.Frame(frame_header, bg=BG_COLOR)
 header_centro.grid(row=0, column=1)
 
+logos_institucionales_imgs = []
 if ImageTk:
     ultimo_indice = len(LOGOS_HEADER) - 1
     for indice, nombre_archivo in enumerate(LOGOS_HEADER):
@@ -135,10 +295,11 @@ if ImageTk:
             imagen = Image.open(ruta_logo)
             alto_nuevo = int(imagen.height * (LOGO_WIDTH / imagen.width))
             logo_img = ImageTk.PhotoImage(imagen.resize((LOGO_WIDTH, alto_nuevo)))
+            logos_institucionales_imgs.append(logo_img)
             margen_derecho = 0 if indice == ultimo_indice else LOGO_GAP
-            logo_label = tk.Label(header_centro, image=logo_img, bg=BG_COLOR)
-            logo_label.image = logo_img
-            logo_label.pack(side="left", padx=(0, margen_derecho), pady=0)
+            lbl_institucional = tk.Label(header_centro, image=logo_img, bg=BG_COLOR)
+            lbl_institucional.image = logo_img
+            lbl_institucional.pack(side="left", padx=(0, margen_derecho), pady=0)
         except Exception:
             pass
 
@@ -195,7 +356,7 @@ def _actualizar_bbdd():
 
 
 def _salir_aplicacion():
-    for liberar in (puertos.liberar_puertos, rastrear.liberar_puertos):
+    for liberar in (puertos.liberar_puertos, rastrear.liberar_puertos, rf_hound.liberar_recursos):
         try:
             liberar()
         except Exception:
@@ -220,31 +381,47 @@ if icono_salir_normal:
         command=_salir_aplicacion,
     ).pack(side="left")
 
-# ---------------- PANEL CARGAR SKETCH ----------------
+# ---------------- PESTAÑA 1: CONTENIDO MAIN (ARDUINO HOUND) ----------------
+frame_main_content = tk.Frame(root, bg=BG_COLOR)
+frame_main_content.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
+frame_main_content.columnconfigure(0, weight=7)
+frame_main_content.columnconfigure(1, weight=13)
+frame_main_content.rowconfigure(0, weight=1)
+
+# Panel Cargar sketch
 frame_cargar_sketch = tk.Frame(
-    root,
+    frame_main_content,
     bg=BG_COLOR,
     highlightbackground=FRAME_BORDER_COLOR,
-    highlightthickness=1
+    highlightthickness=1,
 )
-frame_cargar_sketch.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+frame_cargar_sketch.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
 cargarSketch.crear_panel(frame_cargar_sketch)
 
-# ---------------- PANEL RASTREAR COMPONENTES ----------------
+# Panel Rastrear componentes
 frame_rastrear = tk.Frame(
-    root,
+    frame_main_content,
     bg=BG_COLOR,
     highlightbackground=FRAME_BORDER_COLOR,
-    highlightthickness=1
+    highlightthickness=1,
 )
-frame_rastrear.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
+frame_rastrear.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
 
 rastrear.crear_panel(frame_rastrear)
 
+# ---------------- PESTAÑA 2: CONTENIDO RF HOUND ----------------
+frame_rf_content = tk.Frame(root, bg=BG_COLOR)
+frame_rf_content.columnconfigure(0, weight=1)
+frame_rf_content.rowconfigure(0, weight=1)
+
+rf_hound.crear_panel(frame_rf_content)
+frame_rf_content.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
+frame_rf_content.grid_remove()
+
 # ---------------- PIE DE PÁGINA ----------------
 frame_footer = tk.Frame(root, bg=BG_COLOR, height=FOOTER_HEIGHT)
-frame_footer.grid(row=2, column=0, columnspan=2, sticky="ew", padx=15, pady=0)
+frame_footer.grid(row=3, column=0, sticky="ew", padx=15, pady=0)
 frame_footer.grid_propagate(False)  # conserva el alto fijo aunque no tenga contenido
 
 tk.Label(
