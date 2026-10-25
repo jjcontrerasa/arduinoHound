@@ -4,6 +4,13 @@ import tkinter as tk
 from pathlib import Path
 
 
+APP_NAME = "Arduino Hound V3"
+
+
+def titulo(subtitulo=None):
+    return f"{APP_NAME} - {subtitulo}" if subtitulo else APP_NAME
+
+
 PROJECT_PATH = Path(__file__).resolve().parent.parent
 RESOURCE_PATH = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else PROJECT_PATH
 

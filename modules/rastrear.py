@@ -12,7 +12,7 @@ from .deteccion_puertos import obtener_puertos, parsear_puertos
 from .estado_ui import BarCarga, IndicadorEstado
 from .persistencia import cargar_boards, cargar_i2c, cargar_json, cargar_placas, cargar_spi
 from .rastreo_serial import leer_datos
-from .rutas import configurar_ventana, resource_path, user_data_path
+from .rutas import configurar_ventana, resource_path, titulo, user_data_path
 
 COLOR_TITULO = "OliveDrab2"
 COLOR_OK = "green"
@@ -343,7 +343,7 @@ def crear_panel(root):
 
     def abrir_ventana_reporte():
         ventana = tk.Toplevel(root)
-        ventana.title("Generar reporte")
+        ventana.title(titulo("Generar reporte"))
         configurar_ventana(ventana)
         ventana.configure(bg="black")
         ventana.geometry("1040x660")
@@ -1045,7 +1045,7 @@ def crear_panel(root):
                     registros = json.load(archivo)
             except (OSError, json.JSONDecodeError):
                 messagebox.showinfo(
-                    "Ver registros",
+                    titulo("Ver registros"),
                     "No hay reportes guardados.",
                     parent=ventana,
                 )
@@ -1055,14 +1055,14 @@ def crear_panel(root):
                 registros = [registros]
             if not isinstance(registros, list) or not registros:
                 messagebox.showinfo(
-                    "Ver registros",
+                    titulo("Ver registros"),
                     "No hay reportes guardados.",
                     parent=ventana,
                 )
                 return
 
             ventana_registros = tk.Toplevel(ventana)
-            ventana_registros.title("Registros guardados")
+            ventana_registros.title(titulo("Registros guardados"))
             configurar_ventana(ventana_registros)
             ventana_registros.after(10, configurar_ventana, ventana_registros)
             ventana_registros.configure(bg="black")
@@ -1186,7 +1186,7 @@ def crear_panel(root):
                 return
             boton_guardar.config(state="disabled")
             messagebox.showinfo(
-                "Generar reporte",
+                titulo("Generar reporte"),
                 "El reporte se guardó correctamente.",
                 parent=ventana,
             )
@@ -1219,7 +1219,7 @@ def crear_panel(root):
             registros = [item for item in registros if isinstance(item, dict)]
             if not registros:
                 messagebox.showinfo(
-                    "Descargar reporte", "No hay reportes guardados.", parent=ventana
+                    titulo("Descargar reporte"), "No hay reportes guardados.", parent=ventana
                 )
                 return
             ahora_descarga = datetime.now()
@@ -1230,7 +1230,7 @@ def crear_panel(root):
             carpeta_descargas = Path.home() / "Downloads"
             destino = filedialog.asksaveasfilename(
                 parent=ventana,
-                title="Descargar reporte",
+                title=titulo("Descargar reporte"),
                 defaultextension=".csv",
                 initialdir=str(carpeta_descargas) if carpeta_descargas.is_dir() else None,
                 initialfile=nombre_archivo,
@@ -1260,11 +1260,11 @@ def crear_panel(root):
                         ])
             except OSError as error:
                 messagebox.showerror(
-                    "Descargar reporte", f"No se pudo guardar el archivo:\n{error}", parent=ventana
+                    titulo("Descargar reporte"), f"No se pudo guardar el archivo:\n{error}", parent=ventana
                 )
                 return
             messagebox.showinfo(
-                "Descargar reporte", "El archivo CSV se gener? correctamente.", parent=ventana
+                titulo("Descargar reporte"), "El archivo CSV se gener? correctamente.", parent=ventana
             )
 
         tk.Button(
@@ -1303,7 +1303,7 @@ def crear_panel(root):
                 ventana.destroy()
                 return
             aviso = tk.Toplevel(ventana)
-            aviso.title("Advertencia")
+            aviso.title(titulo("Advertencia"))
             configurar_ventana(aviso)
             aviso.after(10, configurar_ventana, aviso)
             aviso.configure(bg="black")
@@ -1648,7 +1648,7 @@ def crear_panel(root):
         lat, lon = gps_coords_actuales[0]
 
         ventana = tk.Toplevel(root)
-        ventana.title("Ubicación GPS")
+        ventana.title(titulo("Ubicación GPS"))
         configurar_ventana(ventana)
         ventana.resizable(False, False)
         ventana.transient(root)

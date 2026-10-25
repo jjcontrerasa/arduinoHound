@@ -1,6 +1,6 @@
 ; Inno Setup: compilar con ISCC.exe ArduinoHound.iss (requiere dist\ArduinoHound de PyInstaller)
-#define AppName "Arduino Hound V2"
-#define AppVersion "2.0.0"
+#define AppName "Arduino Hound V3"
+#define AppVersion "3.0.0"
 #define AppPublisher "Instituto Politécnico Nacional"
 #define AppExe "ArduinoHound.exe"
 

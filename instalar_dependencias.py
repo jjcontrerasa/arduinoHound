@@ -1,4 +1,4 @@
-"""Prepara las dependencias necesarias para ejecutar Arduino Hound V2.
+"""Prepara las dependencias necesarias para ejecutar Arduino Hound V3.
 
 Uso desde el código fuente:
     python instalar_dependencias.py
@@ -50,7 +50,7 @@ def validate_runtime_files() -> None:
     if missing:
         formatted = "\n".join(f"- {path.relative_to(PROJECT_ROOT)}" for path in missing)
         raise FileNotFoundError(
-            "Faltan recursos necesarios para Arduino Hound V2:\n" + formatted
+            "Faltan recursos necesarios para Arduino Hound V3:\n" + formatted
         )
     print("Recursos Arduino: OK")
 

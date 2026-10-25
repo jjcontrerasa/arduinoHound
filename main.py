@@ -33,6 +33,7 @@ import modules.cargarSketch as cargarSketch
 import modules.puertos as puertos
 import modules.rastrear as rastrear
 import modules.rf_hound as rf_hound
+from modules.rutas import APP_NAME, titulo
 
 
 # ---------------- CONFIG ----------------
@@ -40,7 +41,7 @@ BG_COLOR = "black"
 FRAME_BORDER_COLOR = "white"
 COLOR_AZUL = "#3399FF"
 COLOR_RF_VERDE = "green2"
-TITLE = "ArduinoHound V2"
+TITLE = APP_NAME
 HEADER_HEIGHT = 100
 FOOTER_HEIGHT = 60
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
@@ -115,7 +116,7 @@ frame_rf_content = None
 
 
 def cambiar_pestana(nombre):
-    """Cambia entre la vista principal (Arduino Hound) y la vista secundaria (RF Hound)."""
+    """Arduino Hound / FRHound."""
     if nombre == "arduino":
         pestana_activa[0] = "arduino"
         if frame_rf_content is not None:
@@ -124,7 +125,7 @@ def cambiar_pestana(nombre):
             frame_main_content.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
 
         if label_titulo_header is not None:
-            label_titulo_header.config(text="Arduino Hound", fg=COLOR_AZUL)
+            label_titulo_header.config(text=APP_NAME, fg=COLOR_AZUL)
         if logo_izq_label is not None and logo_arduino_img is not None:
             logo_izq_label.config(image=logo_arduino_img)
             logo_izq_label.image = logo_arduino_img
@@ -180,7 +181,7 @@ def cambiar_pestana(nombre):
 
 btn_tab_arduino = tk.Button(
     tabs_container,
-    text="  Arduino Hound  ",
+    text=f"  {APP_NAME}  ",
     font=("Arial", 10, "bold"),
     bg="#142132",
     fg=COLOR_AZUL,
@@ -275,7 +276,7 @@ if imagen_inicial is not None:
     logo_izq_label.pack(side="left", padx=(0, 10))
 
 label_titulo_header = tk.Label(
-    header_izq, text="Arduino Hound", fg=COLOR_AZUL, bg=BG_COLOR,
+    header_izq, text=APP_NAME, fg=COLOR_AZUL, bg=BG_COLOR,
     font=("Arial", 18, "bold")
 )
 label_titulo_header.pack(side="left")
@@ -350,7 +351,7 @@ def _actualizar_bbdd():
     exito, mensaje = bbdd_publica.publicar_nueva_version()
     if not exito:
         boton_actualizar_bbdd.config(state="normal", image=icono_actualizar_normal)
-        messagebox.showerror("Actualizar BBDD", mensaje)
+        messagebox.showerror(titulo("Actualizar BBDD"), mensaje)
         return
     boton_actualizar_bbdd.config(image=icono_actualizar_deshabilitado)
 

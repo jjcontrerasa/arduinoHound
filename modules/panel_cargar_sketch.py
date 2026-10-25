@@ -9,7 +9,7 @@ from tkinter import filedialog, messagebox, ttk
 from .arduino_cli import ArduinoCLI, SKETCH_PATH
 from .estado_ui import BarCarga
 from .persistencia import cargar_boards, guardar_placa, obtener_puerto_default, guardar_puerto_default
-from .rutas import configurar_ventana
+from .rutas import configurar_ventana, titulo
 
 
 FRAME_WIDTH = 350
@@ -125,7 +125,7 @@ def on_placa_seleccionada(event=None):
 def mostrar_info_puerto():
     parent = text_output.winfo_toplevel()
     ventana = tk.Toplevel(parent)
-    ventana.title("Información del puerto")
+    ventana.title(titulo("Información del puerto"))
     configurar_ventana(ventana)
     ventana.after(10, configurar_ventana, ventana)
     ventana.configure(bg="black")
@@ -228,7 +228,7 @@ def _cargar(fqbn, sketch_path):
 
 def _mostrar_confirmacion_sketch(nombre_archivo, nombre_placa):
     ventana = tk.Toplevel(text_output.winfo_toplevel())
-    ventana.title("Confirmar carga de sketch")
+    ventana.title(titulo("Confirmar carga de sketch"))
     configurar_ventana(ventana)
     ventana.resizable(False, False)
     ventana.transient(text_output.winfo_toplevel())
@@ -308,7 +308,7 @@ def _mostrar_confirmacion_sketch(nombre_archivo, nombre_placa):
 def _confirmar_reemplazo_firmware():
     parent = text_output.winfo_toplevel()
     ventana = tk.Toplevel(parent)
-    ventana.title("Advertencia de firmware")
+    ventana.title(titulo("Advertencia de firmware"))
     configurar_ventana(ventana)
     ventana.after(10, configurar_ventana, ventana)
     ventana.configure(bg="black")
@@ -379,11 +379,11 @@ def cargar_sketch():
     if not _confirmar_reemplazo_firmware():
         return
     if not fqbn_var.get() or not port_var.get():
-        messagebox.showerror("Error", "Selecciona FQBN y puerto.", parent=text_output.winfo_toplevel())
+        messagebox.showerror(titulo("Error"), "Selecciona FQBN y puerto.", parent=text_output.winfo_toplevel())
         return
     if not SKETCH_PATH.exists():
         messagebox.showerror(
-            "Error",
+            titulo("Error"),
             "No se encontró el sketch requerido. Verifica la instalación de la aplicación.",
             parent=text_output.winfo_toplevel(),
         )
@@ -391,7 +391,7 @@ def cargar_sketch():
     fqbn = fqbn_var.get()
 
     def preguntar_automatico():
-        if not messagebox.askyesno("Modo automático", "No se pudo cargar usando configuración del JSON.\n\n¿Deseas intentar detección automática de placa?", parent=text_output.winfo_toplevel()):
+        if not messagebox.askyesno(titulo("Modo automático"), "No se pudo cargar usando configuración del JSON.\n\n¿Deseas intentar detección automática de placa?", parent=text_output.winfo_toplevel()):
             return
         intentar_auto()
 
@@ -403,14 +403,14 @@ def cargar_sketch():
             fqbn_auto = detectar_fqbn_automatico()
             _actualizar_progreso(25)
             if not fqbn_auto:
-                text_output.after(0, lambda: _finalizar(lambda: messagebox.showerror("Error", "No se pudo detectar el FQBN automáticamente.", parent=text_output.winfo_toplevel())))
+                text_output.after(0, lambda: _finalizar(lambda: messagebox.showerror(titulo("Error"), "No se pudo detectar el FQBN automáticamente.", parent=text_output.winfo_toplevel())))
                 return
             try:
                 text_output.insert(tk.END, f"Intentando automático: {fqbn_auto}\n")
                 _cargar(fqbn_auto, SKETCH_PATH)
-                text_output.after(0, lambda: _finalizar(lambda: messagebox.showinfo("Éxito", f"Cargado automáticamente con:\n{fqbn_auto}", parent=text_output.winfo_toplevel())))
+                text_output.after(0, lambda: _finalizar(lambda: messagebox.showinfo(titulo("Éxito"), f"Cargado automáticamente con:\n{fqbn_auto}", parent=text_output.winfo_toplevel())))
             except subprocess.CalledProcessError:
-                text_output.after(0, lambda: _finalizar(lambda: messagebox.showerror("Error", "Falló también el método automático", parent=text_output.winfo_toplevel())))
+                text_output.after(0, lambda: _finalizar(lambda: messagebox.showerror(titulo("Error"), "Falló también el método automático", parent=text_output.winfo_toplevel())))
 
         threading.Thread(target=tarea, daemon=True).start()
 
@@ -422,7 +422,7 @@ def cargar_sketch():
                 text_output.insert(tk.END, f"\nIntento con JSON: {fqbn}\n")
                 _actualizar_progreso(10)
                 _cargar(fqbn, SKETCH_PATH)
-                text_output.after(0, lambda: _finalizar(lambda: messagebox.showinfo("Éxito", "Sketch cargado correctamente", parent=text_output.winfo_toplevel())))
+                text_output.after(0, lambda: _finalizar(lambda: messagebox.showinfo(titulo("Éxito"), "Sketch cargado correctamente", parent=text_output.winfo_toplevel())))
             except subprocess.CalledProcessError:
                 text_output.insert(tk.END, "Falló método JSON\n")
                 text_output.after(0, lambda: _finalizar(preguntar_automatico))
@@ -435,7 +435,7 @@ def cargar_sketch():
 def cargar_respaldo():
     archivo = filedialog.askopenfilename(
         parent=text_output.winfo_toplevel(),
-        title="Seleccionar sketch de Arduino",
+        title=titulo("Seleccionar sketch de Arduino"),
         filetypes=(
             ("Sketch de Arduino", "*.ino *.pde *.cpp *.c *.h"),
             ("Todos los archivos", "*.*"),
@@ -444,7 +444,7 @@ def cargar_respaldo():
     if not archivo:
         return
     if not port_var.get() or not fqbn_var.get():
-        messagebox.showerror("Error", "Selecciona puerto y placa.", parent=text_output.winfo_toplevel())
+        messagebox.showerror(titulo("Error"), "Selecciona puerto y placa.", parent=text_output.winfo_toplevel())
         return
 
     nombre_placa = placa_var.get().strip() or fqbn_var.get().strip()
@@ -464,10 +464,10 @@ def cargar_respaldo():
             _actualizar_progreso(10)
             text_output.after(0, lambda: text_output.insert(tk.END, f"Cargando: {nombre_archivo}\n"))
             _cargar(fqbn, ruta_temporal.parent)
-            text_output.after(0, lambda: _finalizar(lambda: messagebox.showinfo("Éxito", f"Sketch cargado correctamente en:\n{nombre_placa}", parent=text_output.winfo_toplevel())))
+            text_output.after(0, lambda: _finalizar(lambda: messagebox.showinfo(titulo("Éxito"), f"Sketch cargado correctamente en:\n{nombre_placa}", parent=text_output.winfo_toplevel())))
         except (OSError, subprocess.CalledProcessError):
             text_output.after(0, lambda: _finalizar(lambda: messagebox.showerror(
-                "Error",
+                titulo("Error"),
                 "No se pudo cargar el sketch. Verifica la placa, el puerto y la conexión.",
                 parent=text_output.winfo_toplevel(),
             )))
