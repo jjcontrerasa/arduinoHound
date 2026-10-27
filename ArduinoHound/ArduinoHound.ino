@@ -32,10 +32,66 @@
   #include <SoftwareSerial.h>
   SoftwareSerial uart(2, 3);
   #define BOARD_NAME "NANO"
+#elif defined(ARDUINO_ARCH_ESP32)
+  #include <HardwareSerial.h>
+  #include <soc/soc_caps.h>
+  #define uart Serial1
+  // Pines UART elegidos fuera de flash, PSRAM, USB nativo y consola de cada familia.
+  #if CONFIG_IDF_TARGET_ESP32
+    #define BOARD_NAME "ESP32"
+    #define UART_RX_PIN 26
+    #define UART_TX_PIN 27
+  #elif CONFIG_IDF_TARGET_ESP32S2
+    #define BOARD_NAME "ESP32S2"
+    #define UART_RX_PIN 18
+    #define UART_TX_PIN 17
+  #elif CONFIG_IDF_TARGET_ESP32S3
+    #define BOARD_NAME "ESP32S3"
+    #define UART_RX_PIN 18
+    #define UART_TX_PIN 17
+  #elif CONFIG_IDF_TARGET_ESP32C2
+    #define BOARD_NAME "ESP32C2"
+    #define UART_RX_PIN 4
+    #define UART_TX_PIN 5
+  #elif CONFIG_IDF_TARGET_ESP32C3
+    #define BOARD_NAME "ESP32C3"
+    #define UART_RX_PIN 4
+    #define UART_TX_PIN 5
+  #elif CONFIG_IDF_TARGET_ESP32C6
+    #define BOARD_NAME "ESP32C6"
+    #define UART_RX_PIN 4
+    #define UART_TX_PIN 5
+  #elif CONFIG_IDF_TARGET_ESP32H2
+    #define BOARD_NAME "ESP32H2"
+    #define UART_RX_PIN 4
+    #define UART_TX_PIN 5
+  #else
+    #error "Variante ESP32 no soportada por ArduinoHound"
+  #endif
 #else
   #include <SoftwareSerial.h>
   SoftwareSerial uart(2, 3);
   #define BOARD_NAME "UNKNOWN"
+#endif
+
+#if defined(ARDUINO_ARCH_ESP32)
+// Sustituto de SoftwareSerial: ESP32 enruta una UART hardware a los pines a probar.
+class PuertoSerialPrueba {
+ public:
+  PuertoSerialPrueba(byte rxPin, byte txPin) : rx(rxPin), tx(txPin) {}
+  void begin(unsigned long baudRate) { uart.begin(baudRate, SERIAL_8N1, rx, tx); }
+  void end() { uart.end(); }
+  int available() { return uart.available(); }
+  int read() { return uart.read(); }
+  size_t println(const char *texto) { return uart.println(texto); }
+
+ private:
+  byte rx;
+  byte tx;
+};
+#else
+#include <SoftwareSerial.h>
+typedef SoftwareSerial PuertoSerialPrueba;
 #endif
 
 #define UART_BAUD 9600
@@ -46,6 +102,49 @@ const unsigned long UART_SCAN_BAUDS[] = {9600, 57600, 115200};
 bool pinesCSDetectados[SERIAL_SCAN_MAX_PIN + 1] = {false};
 bool pinesUARTDetectados[SERIAL_SCAN_MAX_PIN + 1] = {false};
 bool hc12Encontrado = false;
+
+void iniciarUART(unsigned long baudRate) {
+#if defined(ARDUINO_ARCH_ESP32)
+  uart.begin(baudRate, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
+#else
+  uart.begin(baudRate);
+#endif
+}
+
+// Evita GPIO que en ESP32 controlan flash/PSRAM, arranque, USB nativo o consola.
+bool esPinReservadoPlaca(byte pin) {
+#if defined(ARDUINO_ARCH_ESP32)
+  if (pin >= SOC_GPIO_PIN_COUNT || ((1ULL << pin) & SOC_GPIO_VALID_OUTPUT_GPIO_MASK) == 0) {
+    return true;
+  }
+  if (pin == SDA || pin == SCL) {
+    return true;
+  }
+  #if CONFIG_IDF_TARGET_ESP32
+    return pin <= 3 || pin == 5 || (pin >= 6 && pin <= 12) ||
+           pin == 15 || pin == 16 || pin == 17;
+  #elif CONFIG_IDF_TARGET_ESP32S2
+    return pin == 0 || pin == 19 || pin == 20 || (pin >= 26 && pin <= 32) ||
+           pin == 43 || pin == 44 || pin == 45 || pin == 46;
+  #elif CONFIG_IDF_TARGET_ESP32S3
+    return pin == 0 || pin == 3 || pin == 19 || pin == 20 ||
+           (pin >= 26 && pin <= 37) || pin >= 43;
+  #elif CONFIG_IDF_TARGET_ESP32C2
+    return pin == 8 || pin == 9 || (pin >= 11 && pin <= 17) || pin == 19 || pin == 20;
+  #elif CONFIG_IDF_TARGET_ESP32C3
+    return pin == 2 || pin == 8 || pin == 9 || pin >= 11;
+  #elif CONFIG_IDF_TARGET_ESP32C6
+    return pin == 8 || pin == 9 || (pin >= 12 && pin <= 17) || pin >= 24;
+  #elif CONFIG_IDF_TARGET_ESP32H2
+    return pin == 2 || pin == 3 || pin == 8 || pin == 9 || pin >= 15;
+  #else
+    return true;
+  #endif
+#else
+  return false;
+#endif
+}
+
 
 void registrarPinCS(byte pin) {
   if (pin <= SERIAL_SCAN_MAX_PIN) {
@@ -118,6 +217,9 @@ byte leerRegistroSPI(int csPin, byte registro) {
 
 bool esPinSPIExcluido(byte pin) {
   // No usar UART USB ni las líneas físicas de los buses SPI e I2C como CS.
+  if (esPinReservadoPlaca(pin)) {
+    return true;
+  }
   if (pin == 0 || pin == 1 || pin == MOSI || pin == MISO || pin == SCK) {
     return true;
   }
@@ -167,6 +269,9 @@ void leerJEDEC_ID(int csPin, byte &manufacturer, byte &tipo, byte &capacidad) {
 
 bool probarFlashSPI(int modulo) {
   byte csPin = modulosFlashSPI[modulo].csPin;
+  if (esPinSPIExcluido(csPin)) {
+    return false;
+  }
   byte manufacturer, tipo, capacidad;
   leerJEDEC_ID(csPin, manufacturer, tipo, capacidad);
 
@@ -189,6 +294,9 @@ bool probarFlashSPI(int modulo) {
 }
 
 bool probarModuloSPI(byte csPin, int modulo) {
+  if (esPinSPIExcluido(csPin)) {
+    return false;
+  }
   byte id = leerRegistroSPI(csPin, modulosSPI[modulo].regID);
 
   if (id != modulosSPI[modulo].valorEsperado) {
@@ -344,10 +452,16 @@ void detectarSPI() {
   }
 
   for (int i = 0; i < NUM_MODULOS_SPI; i++) {
+    if (esPinSPIExcluido(modulosSPI[i].csPin)) {
+      continue;
+    }
     pinMode(modulosSPI[i].csPin, OUTPUT);
     digitalWrite(modulosSPI[i].csPin, HIGH);
   }
   for (int i = 0; i < NUM_MODULOS_FLASH_SPI; i++) {
+    if (esPinSPIExcluido(modulosFlashSPI[i].csPin)) {
+      continue;
+    }
     pinMode(modulosFlashSPI[i].csPin, OUTPUT);
     digitalWrite(modulosFlashSPI[i].csPin, HIGH);
   }
@@ -479,7 +593,7 @@ void detectarSPI() {
 // Envía un comando AT y recopila la respuesta del módulo RYLR998.
 String consultarLora(const char *comando, unsigned long baudRate) {
   uart.end();
-  uart.begin(baudRate);
+  iniciarUART(baudRate);
   delay(5);
   uart.println(comando);
 
@@ -503,11 +617,15 @@ String consultarLora(const char *comando, unsigned long baudRate) {
   }
 
   uart.end();
-  uart.begin(UART_BAUD);
+  iniciarUART(UART_BAUD);
   return respuesta;
 }
 
 bool esPinSerialPermitido(byte pin) {
+  if (esPinReservadoPlaca(pin)) {
+    return false;
+  }
+
   if (pin == 0 || pin == 1) {
     return false;
   }
@@ -523,7 +641,7 @@ bool esPinSerialPermitido(byte pin) {
   return true;
 }
 
-String leerRespuestaSoftware(SoftwareSerial &puerto, unsigned long timeout) {
+String leerRespuestaSoftware(PuertoSerialPrueba &puerto, unsigned long timeout) {
   unsigned long inicio = millis();
   unsigned long ultimoByte = inicio;
   String respuesta = "";
@@ -549,7 +667,7 @@ String leerRespuestaSoftware(SoftwareSerial &puerto, unsigned long timeout) {
   return respuesta;
 }
 
-bool leerGPSSoftware(SoftwareSerial &puerto, unsigned long timeout, float &lat, float &lon) {
+bool leerGPSSoftware(PuertoSerialPrueba &puerto, unsigned long timeout, float &lat, float &lon) {
   unsigned long inicio = millis();
   bool detectado = false;
   String trama = "";
@@ -623,7 +741,7 @@ bool probarPuertoSerial(byte rxPin, byte txPin) {
     return false;
   }
 
-  SoftwareSerial prueba(rxPin, txPin);
+  PuertoSerialPrueba prueba(rxPin, txPin);
   for (byte indiceBaud = 0; indiceBaud < sizeof(UART_SCAN_BAUDS) / sizeof(UART_SCAN_BAUDS[0]); indiceBaud++) {
     prueba.begin(UART_SCAN_BAUDS[indiceBaud]);
     delay(5);
@@ -694,7 +812,7 @@ bool escanearGPSSoftware() {
       continue;
     }
 
-    SoftwareSerial prueba(rxPin, txPin);
+    PuertoSerialPrueba prueba(rxPin, txPin);
     prueba.begin(GPS_BAUD);
     delay(5);
 
@@ -741,7 +859,7 @@ bool probarHC12ConSET(byte setPin, byte rxPin, byte txPin, unsigned long baudRat
     return false;
   }
 
-  SoftwareSerial prueba(rxPin, txPin);
+  PuertoSerialPrueba prueba(rxPin, txPin);
   prueba.begin(baudRate);
   delay(5);
   prueba.println("AT+RX");
@@ -814,7 +932,7 @@ void setup() {
   Serial.begin(115200);
 
   // Inicializa la UART conectada al GPS o al módulo LoRa.
-  uart.begin(UART_BAUD);
+  iniciarUART(UART_BAUD);
 
   // Inicializa el bus I2C para detectar periféricos conectados.
   Wire.begin();
@@ -822,10 +940,16 @@ void setup() {
   // Inicializa el bus SPI y los pines Chip Select de los módulos conocidos.
   SPI.begin();
   for (int i = 0; i < NUM_MODULOS_SPI; i++) {
+    if (esPinSPIExcluido(modulosSPI[i].csPin)) {
+      continue;
+    }
     pinMode(modulosSPI[i].csPin, OUTPUT);
     digitalWrite(modulosSPI[i].csPin, HIGH);
   }
   for (int i = 0; i < NUM_MODULOS_FLASH_SPI; i++) {
+    if (esPinSPIExcluido(modulosFlashSPI[i].csPin)) {
+      continue;
+    }
     pinMode(modulosFlashSPI[i].csPin, OUTPUT);
     digitalWrite(modulosFlashSPI[i].csPin, HIGH);
   }
@@ -883,6 +1007,13 @@ void loop() {
 // ================= DETECCIÓN DE DISPOSITIVOS I2C =================
 void informarPinesI2C() {
   Serial.print("I2C_PINS:SDA=");
+#if defined(ARDUINO_ARCH_ESP32)
+  Serial.print("GPIO");
+  Serial.print(SDA);
+  Serial.print(";SCL=GPIO");
+  Serial.println(SCL);
+  return;
+#endif
 #if defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_MEGA1280)
   Serial.print("D20");
 #elif defined(ARDUINO_AVR_LEONARDO) || defined(ARDUINO_AVR_MICRO)
@@ -995,7 +1126,12 @@ bool parsearCoordenadasNMEA(String trama, float &lat, float &lon) {
 
 // ================= DETECCIÓN DE DISPOSITIVOS UART =================
 bool escucharGPSHardware() {
-#if defined(ARDUINO_AVR_NANO_EVERY) || defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_MEGA1280) || defined(ARDUINO_AVR_LEONARDO) || defined(ARDUINO_AVR_MICRO)
+#if defined(ARDUINO_AVR_NANO_EVERY) || defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_MEGA1280) || defined(ARDUINO_AVR_LEONARDO) || defined(ARDUINO_AVR_MICRO) || defined(ARDUINO_ARCH_ESP32)
+#if defined(ARDUINO_ARCH_ESP32)
+  // La UART pudo quedar asignada a otros pines durante el ciclo de escaneo anterior.
+  uart.end();
+  iniciarUART(GPS_BAUD);
+#endif
   unsigned long inicio = millis();
   bool detectado = false;
   String trama = "";
@@ -1020,7 +1156,11 @@ bool escucharGPSHardware() {
   }
 
   if (detectado) {
+#if defined(ARDUINO_ARCH_ESP32)
+    informarGPS(UART_RX_PIN, UART_TX_PIN, lat, lon, lat != 0.0 || lon != 0.0);
+#else
     informarGPS(0, 0, lat, lon, lat != 0.0 || lon != 0.0);
+#endif
   }
   return detectado;
 #else

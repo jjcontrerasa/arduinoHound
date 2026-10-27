@@ -1,0 +1,59 @@
+RF Hound v2 - receptor pasivo Heltec ESP32-S3/SX1262
+==================================================
+Solo para la placa con pinout Heltec V3 y etapa RF de banda alta.
+La banda de software es 868-928 MHz; no garantiza sensibilidad uniforme.
+Usar antena apropiada. No hay comandos de transmision.
+Arduino Hound, el transmisor y los logos del encabezado no se modifican.
+
+Flujo de uso
+-----------
+1. Conectar USB. La interfaz exige HELLO de firmware v2, no solo un VID/PID.
+2. Configurar inicio/fin/paso en Detectar senal e iniciar escaneo.
+3. Seleccionar un pico o escribir la frecuencia y pulsar Fijar frecuencia.
+4. En Capturar paquetes, configurar BW, SF, CR, sync word hexadecimal,
+   preambulo, CRC e inversion IQ. Pulsar Intentar captura LoRa.
+5. Seleccionar un paquete y consultar Decodificar datos para HEX/texto UTF-8.
+6. Guardar paquetes JSONL conserva hora UTC de recepcion en PC, perfil,
+   frecuencia, RSSI, SNR y contenido exacto. Se retienen los ultimos 500.
+7. Detener envia STOP al radio. El arranque es en reposo.
+
+El receptor escucha una frecuencia/configuracion a la vez. El barrido breve
+puede perder rafagas; fijar frecuencia mejora la observacion temporal.
+No hay deteccion automatica de modulos ni busqueda automatica de perfiles.
+LoRa usa cabecera explicita; BW 125/250/500 kHz, SF7-12 y CR 4/5-4/8.
+El perfil por defecto es solo un ejemplo; debe coincidir con el emisor.
+CRC deshabilitado no permite afirmar integridad del contenido recibido.
+Los errores CRC no se presentan como paquetes exitosos.
+No se decodifican HC-12/HC-11, FSK propietario, NRF24, Bluetooth ni cifrado.
+FSK se usa solo para medir RSSI en escaneo/frecuencia fija.
+
+Serial: 115200 baud, ASCII, una trama por linea
+----------------------------------------------
+ID
+  -> HELLO,RFHOUND,2,SX1262,868,928
+SCAN,<inicio MHz>,<fin MHz>,<paso MHz>
+  -> ACK,SCAN
+  -> RF,<MHz>,<dBm> por medicion; PEAK,<MHz>,<dBm> por barrido completo
+HOLD,<MHz>
+  -> ACK,HOLD; RF,<MHz>,<dBm> cada ~50 ms
+LORA,<MHz>,<BW kHz>,<SF>,<CR denominador>,<sync decimal>,<preambulo>,<CRC 0/1>,<IQ 0/1>
+  -> ACK,LORA
+  -> PKT,<MHz>,<RSSI dBm>,<SNR dB>,<longitud bytes>,<hex sin espacios>
+STOP
+  -> ACK,IDLE
+ALIVE,<IDLE|SCAN|HOLD|LORA> cada segundo mantiene la supervision USB.
+ERR,<operacion>,<codigo o motivo> indica fallo explicitamente.
+
+Ejemplo (sync 0x12 equivale a 18 decimal):
+HOLD,915.000
+LORA,915.000,125,7,5,18,8,1,0
+
+La interfaz espera ACK antes de cambiar el modo. Ante falta de confirmacion,
+cierra/reabre la conexion y solicita STOP. Al desconectar USB o cerrar la
+aplicacion, se descartan comandos pendientes; no se reanuda captura sola.
+El monitor USB puede reiniciar candidatos CP210x/Espressif una vez para
+obtener identidad. Una placa sin firma RF Hound no se habilita ni se
+reintenta hasta reconectarla. Cerrar otros monitores serial antes de usar.
+
+Compilacion: esp32:esp32:heltec_wifi_lora_32_V3, RadioLib y Adafruit SSD1306/GFX.
+logo_placa.h conserva el logo OLED del usuario.

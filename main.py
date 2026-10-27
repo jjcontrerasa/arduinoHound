@@ -2,7 +2,6 @@ import subprocess
 import sys
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox
 
 try:
     from PIL import Image, ImageEnhance, ImageTk
@@ -33,7 +32,7 @@ import modules.cargarSketch as cargarSketch
 import modules.puertos as puertos
 import modules.rastrear as rastrear
 import modules.rf_hound as rf_hound
-from modules.rutas import APP_NAME, titulo
+from modules.rutas import APP_NAME, configurar_ventana, messagebox, titulo
 
 
 # ---------------- CONFIG ----------------
@@ -64,28 +63,8 @@ INTERVALO_REVISION_BBDD_MS = 4000
 # ---------------- MAIN WINDOW ----------------
 root = tk.Tk()
 root.title(TITLE)
-root.configure(bg=BG_COLOR)
+configurar_ventana(root)
 root.state("zoomed")
-
-if ICON_PATH.exists():
-    try:
-        root.iconbitmap(str(ICON_PATH))
-    except Exception:
-        pass
-
-
-def _activar_modo_oscuro():
-    """Fuerza la barra de titulo oscura en Windows 10/11 (no falla si no aplica)."""
-    try:
-        import ctypes
-        hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
-        valor = ctypes.c_int(1)
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(valor), ctypes.sizeof(valor))
-    except Exception:
-        pass
-
-
-root.after(10, _activar_modo_oscuro)
 
 # Tamaño inicial
 root.geometry("1200x720")

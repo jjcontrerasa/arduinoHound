@@ -7,12 +7,14 @@ import json
 import csv
 from pathlib import Path
 from datetime import datetime
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, ttk
 from .deteccion_puertos import obtener_puertos, parsear_puertos
 from .estado_ui import BarCarga, IndicadorEstado
 from .persistencia import cargar_boards, cargar_i2c, cargar_json, cargar_placas, cargar_spi
 from .rastreo_serial import leer_datos
-from .rutas import configurar_ventana, resource_path, titulo, user_data_path
+from .rutas import (
+    crear_boton, crear_ventana, messagebox, resource_path, titulo, user_data_path,
+)
 
 COLOR_TITULO = "OliveDrab2"
 COLOR_OK = "green"
@@ -342,17 +344,11 @@ def crear_panel(root):
     salida.tag_config("ok", foreground=COLOR_OK)
 
     def abrir_ventana_reporte():
-        ventana = tk.Toplevel(root)
-        ventana.title(titulo("Generar reporte"))
-        configurar_ventana(ventana)
-        ventana.configure(bg="black")
+        ventana = crear_ventana(root, titulo("Generar reporte"), modal=True)
         ventana.geometry("1040x660")
         ventana.resizable(False, False)
-        ventana.transient(root)
-        ventana.grab_set()
 
         ventana.update_idletasks()
-        ventana.after(10, configurar_ventana, ventana)
         x = (ventana.winfo_screenwidth() - ventana.winfo_width()) // 2
         y = (ventana.winfo_screenheight() - ventana.winfo_height()) // 2
         ventana.geometry(f"+{x}+{y}")
@@ -1061,11 +1057,9 @@ def crear_panel(root):
                 )
                 return
 
-            ventana_registros = tk.Toplevel(ventana)
-            ventana_registros.title(titulo("Registros guardados"))
-            configurar_ventana(ventana_registros)
-            ventana_registros.after(10, configurar_ventana, ventana_registros)
-            ventana_registros.configure(bg="black")
+            ventana_registros = crear_ventana(
+                ventana, titulo("Registros guardados")
+            )
             ancho_registros, alto_registros = 1060, 448
             ventana_registros.geometry(
                 f"{ancho_registros}x{alto_registros}"
@@ -1073,7 +1067,6 @@ def crear_panel(root):
                 f"+{(ventana_registros.winfo_screenheight() - alto_registros) // 2}"
             )
             ventana_registros.resizable(False, False)
-            ventana_registros.transient(ventana)
 
             lista_registros = ttk.Treeview(
                 ventana_registros,
@@ -1302,48 +1295,12 @@ def crear_panel(root):
             if str(boton_guardar["state"]) == "disabled":
                 ventana.destroy()
                 return
-            aviso = tk.Toplevel(ventana)
-            aviso.title(titulo("Advertencia"))
-            configurar_ventana(aviso)
-            aviso.after(10, configurar_ventana, aviso)
-            aviso.configure(bg="black")
-            aviso.resizable(False, False)
-            aviso.transient(ventana)
-            contenido = tk.Frame(aviso, bg="black")
-            contenido.pack(padx=24, pady=20)
-            tk.Label(
-                contenido,
-                text="Aún no guarda el registro actual.\n¿Esta seguro que desea salir?",
-                fg="white",
-                bg="black",
-                justify="center",
-            ).pack(fill="x")
-            botones = tk.Frame(contenido, bg="black")
-            botones.pack(pady=(18, 0))
-
-            def aceptar():
-                aviso.destroy()
+            if messagebox.askyesno(
+                titulo("Advertencia"),
+                "Aún no guarda el registro actual.\n¿Esta seguro que desea salir?",
+                parent=ventana,
+            ):
                 ventana.destroy()
-
-            boton_cancelar = tk.Button(
-                botones, text="Cancelar", command=aviso.destroy,
-                bg="black", fg="white", highlightbackground="OliveDrab",
-                highlightthickness=1,
-            )
-            boton_cancelar.pack(side="left", padx=5)
-            tk.Button(
-                botones, text="Aceptar", command=aceptar,
-                bg="black", fg="white", highlightbackground="OliveDrab",
-                highlightthickness=1,
-            ).pack(side="left", padx=5)
-            aviso.bind("<Escape>", lambda _event: aviso.destroy())
-            aviso.update_idletasks()
-            aviso.geometry(
-                f"+{ventana.winfo_rootx() + (ventana.winfo_width() - aviso.winfo_width()) // 2}"
-                f"+{ventana.winfo_rooty() + (ventana.winfo_height() - aviso.winfo_height()) // 2}"
-            )
-            aviso.grab_set()
-            aviso.after_idle(boton_cancelar.focus_set)
 
         boton_salir = tk.Button(
             frame_reporte,
@@ -1647,12 +1604,8 @@ def crear_panel(root):
 
         lat, lon = gps_coords_actuales[0]
 
-        ventana = tk.Toplevel(root)
-        ventana.title(titulo("Ubicación GPS"))
-        configurar_ventana(ventana)
+        ventana = crear_ventana(root, titulo("Ubicación GPS"), modal=True)
         ventana.resizable(False, False)
-        ventana.transient(root)
-        ventana.grab_set()
 
         tk.Label(ventana, text="📍 Coordenadas GPS",
                  fg=COLOR_TITULO, bg="black",
@@ -1667,17 +1620,12 @@ def crear_panel(root):
         def buscar_en_maps():
             webbrowser.open(f"https://www.google.com/maps/search/?api=1&query={lat},{lon}")
 
-        tk.Button(frame_botones, text="Buscar en Maps",
-                  command=buscar_en_maps,
-                  bg="black", fg="white",
-                  highlightbackground="OliveDrab",
-                  highlightthickness=1).pack(side="left", padx=5)
-
-        tk.Button(frame_botones, text="Salir",
-                  command=ventana.destroy,
-                  bg="black", fg="white",
-                  highlightbackground="OliveDrab",
-                  highlightthickness=1).pack(side="left", padx=5)
+        crear_boton(
+            frame_botones, "Buscar en Maps", buscar_en_maps
+        ).pack(side="left", padx=5)
+        crear_boton(frame_botones, "Salir", ventana.destroy).pack(
+            side="left", padx=5
+        )
 
     # =========================
     # RASTREAR

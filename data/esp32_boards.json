@@ -1,0 +1,52 @@
+{
+    "esp32_dev_module": {
+        "name": "ESP32 Dev Module",
+        "mcu": "ESP32",
+        "fqbn": "esp32:esp32:esp32"
+    },
+    "esp32_s2_dev_module": {
+        "name": "ESP32S2 Dev Module",
+        "mcu": "ESP32-S2",
+        "fqbn": "esp32:esp32:esp32s2"
+    },
+    "esp32_s3_dev_module": {
+        "name": "ESP32S3 Dev Module",
+        "mcu": "ESP32-S3",
+        "fqbn": "esp32:esp32:esp32s3"
+    },
+    "esp32_c3_dev_module": {
+        "name": "ESP32C3 Dev Module",
+        "mcu": "ESP32-C3",
+        "fqbn": "esp32:esp32:esp32c3"
+    },
+    "esp32_c6_dev_module": {
+        "name": "ESP32C6 Dev Module",
+        "mcu": "ESP32-C6",
+        "fqbn": "esp32:esp32:esp32c6"
+    },
+    "esp32_h2_dev_module": {
+        "name": "ESP32H2 Dev Module",
+        "mcu": "ESP32-H2",
+        "fqbn": "esp32:esp32:esp32h2"
+    },
+    "esp32_wrover": {
+        "name": "ESP32 Wrover Module",
+        "mcu": "ESP32",
+        "fqbn": "esp32:esp32:esp32wrover"
+    },
+    "esp32_doit_devkit_v1": {
+        "name": "DOIT ESP32 DEVKIT V1",
+        "mcu": "ESP32",
+        "fqbn": "esp32:esp32:esp32doit-devkit-v1"
+    },
+    "esp32_nodemcu_32s": {
+        "name": "NodeMCU-32S",
+        "mcu": "ESP32",
+        "fqbn": "esp32:esp32:nodemcu-32s"
+    },
+    "esp32_lolin32": {
+        "name": "WEMOS LOLIN32",
+        "mcu": "ESP32",
+        "fqbn": "esp32:esp32:lolin32"
+    }
+}
