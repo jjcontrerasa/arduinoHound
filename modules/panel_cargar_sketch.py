@@ -7,24 +7,35 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .arduino_cli import ArduinoCLI, SKETCH_PATH
+from .deteccion_puertos import (
+    familia_fqbn, identificar_placa, obtener_dispositivos, parsear_dispositivos,
+)
 from .estado_ui import BarCarga
-from .persistencia import cargar_boards, guardar_placa, obtener_puerto_default, guardar_puerto_default
+from .persistencia import (
+    cargar_boards, cargar_boards_esp32, guardar_placa,
+    obtener_puerto_default, guardar_puerto_default,
+)
 from .rutas import configurar_ventana, titulo
 
 
 FRAME_WIDTH = 350
 LIST_MAX_HEIGHT = 200
 TEXT_HEIGHT = 6
-DETAILS_HEIGHT = 4
+DETAILS_HEIGHT = 5
 COLOR_TITULO = "OliveDrab2"
 
 arduino_boards = cargar_boards()
+esp32_boards = cargar_boards_esp32()
 arduino = ArduinoCLI()
 fqbn_var = None
 port_var = None
 placa_var = None
+esp32_var = None
 frame_radios = None
 board_combo = None
+esp32_combo = None
+puertos_detectados = {}
+metadatos_puertos = {}
 detalles_output = None
 text_output = None
 barCarga = None
@@ -82,7 +93,7 @@ def asegurar_core_instalado(fqbn):
 
 
 def detectar_placas():
-    return arduino.list_boards()
+    return arduino.discover_boards()
 
 
 def mostrar_detalles(val, key):
@@ -91,11 +102,13 @@ def mostrar_detalles(val, key):
         tk.END,
         f"Placa: {val.get('name', key)}\nFQBN: {val['fqbn']}\nMCU: {val.get('mcu', '-')}\n",
     )
+    if familia_fqbn(val["fqbn"]) == "esp32":
+        detalles_output.insert(tk.END, "Carga del sketch con el FQBN ESP32 seleccionado.\n")
 
 
 def guardar_asociacion_puerto():
     puerto = port_var.get().strip() if port_var else ""
-    clave = placa_var.get().strip() if placa_var else ""
+    clave = (placa_var.get().strip() or esp32_var.get().strip()) if placa_var else ""
     fqbn = fqbn_var.get().strip() if fqbn_var else ""
     if not puerto or not fqbn:
         return
@@ -106,6 +119,13 @@ def guardar_asociacion_puerto():
 
 
 def seleccionar_placa(val, key):
+    es_esp32 = familia_fqbn(val["fqbn"]) == "esp32"
+    catalogo, combo = (esp32_boards, esp32_combo) if es_esp32 else (arduino_boards, board_combo)
+    if key not in catalogo:
+        catalogo[key] = val
+        combo["values"] = sorted(catalogo)
+    placa_var.set("" if es_esp32 else key)
+    esp32_var.set(key if es_esp32 else "")
     fqbn_var.set(val["fqbn"])
     guardar_asociacion_puerto()
     mostrar_detalles(val, key)
@@ -120,6 +140,18 @@ def on_placa_seleccionada(event=None):
         guardado = next((k for k, v in arduino_boards.items() if v["fqbn"] == key), None)
         if guardado:
             seleccionar_placa(arduino_boards[guardado], guardado)
+
+
+def on_esp32_seleccionada(event=None):
+    key = esp32_var.get()
+    value = esp32_boards.get(key)
+    if value:
+        seleccionar_placa(value, key)
+
+
+def _habilitar_listas(familia=None):
+    board_combo.configure(state="disabled" if familia == "esp32" else "readonly")
+    esp32_combo.configure(state="disabled" if familia == "arduino" else "readonly")
 
 
 def mostrar_info_puerto():
@@ -154,25 +186,76 @@ def seleccionar_puerto(linea, puerto):
     port_var.set(puerto)
     fqbn_var.set("")
     placa_var.set("")
+    esp32_var.set("")
     detalles_output.delete("1.0", tk.END)
-    line_lower = linea.lower()
-    match_key = None
-    for key in sorted(arduino_boards, key=len, reverse=True):
-        if all(part in line_lower for part in key.split("_")):
-            match_key = key
-            break
-
-    if match_key:
-        fqbn_var.set(arduino_boards[match_key]["fqbn"])
-        placa_var.set(match_key)
-        guardar_asociacion_puerto()
-        mostrar_detalles(arduino_boards[match_key], match_key)
+    entrada = puertos_detectados.get(
+        puerto, {"port": {"address": puerto, "label": linea}}
+    )
+    familia, clave, datos = identificar_placa(
+        entrada,
+        {"arduino": arduino_boards, "esp32": esp32_boards},
+        metadatos_puertos.get(puerto),
+    )
+    _habilitar_listas(familia)
+    if datos:
+        seleccionar_placa(datos, clave)
         return
 
-    board_combo["values"] = sorted(arduino_boards)
-    placa_var.set("")
+    nombre = {"arduino": "Arduino", "esp32": "ESP32"}.get(familia, "Arduino o ESP32")
+    detalles_output.insert(
+        tk.END,
+        f"No se detectó un FQBN exacto para este puerto.\n"
+        f"Selecciona manualmente la placa {nombre}.\n",
+    )
+
+
+def _actualizar_puertos(entradas, dispositivos):
+    puertos_detectados.clear()
+    metadatos_puertos.clear()
+    if isinstance(dispositivos, str):
+        dispositivos = parsear_dispositivos(dispositivos)
+    if isinstance(dispositivos, list):
+        metadatos_puertos.update({
+            item["puerto"]: item for item in dispositivos if item.get("puerto")
+        })
+    puertos_detectados.update({item["port"]["address"]: item for item in entradas})
+    for puerto, datos in metadatos_puertos.items():
+        puertos_detectados.setdefault(
+            puerto, {"port": {"address": puerto, "label": datos.get("descripcion", "")}}
+        )
+    for widget in frame_radios.winfo_children():
+        widget.destroy()
+    port_var.set("")
     fqbn_var.set("")
-    detalles_output.insert(tk.END, "No se detectó un FQBN exacto para este puerto.\nSelecciona manualmente la placa Arduino disponible.\n")
+    placa_var.set("")
+    esp32_var.set("")
+    detalles_output.delete("1.0", tk.END)
+    _habilitar_listas()
+    text_output.delete("1.0", tk.END)
+    text_output.insert(tk.END, "Escaneo de puertos completado.\n")
+    for puerto, entrada in puertos_detectados.items():
+        nombres = ", ".join(
+            board.get("name", "") for board in entrada.get("matching_boards", [])
+            if board.get("name")
+        )
+        descripcion = (
+            nombres or metadatos_puertos.get(puerto, {}).get("descripcion")
+            or entrada["port"].get("label") or "Puerto serial"
+        )
+        linea = f"{puerto} - {descripcion}"
+        tk.Radiobutton(
+            frame_radios, text=linea, variable=port_var, value=puerto,
+            bg="black", fg="white", selectcolor="black", anchor="w",
+            wraplength=340,
+            command=lambda value=linea, selected=puerto: seleccionar_puerto(value, selected),
+        ).pack(anchor="w", fill="x")
+    if puertos_detectados:
+        guardado = obtener_puerto_default()
+        puerto = guardado if guardado in puertos_detectados else next(iter(puertos_detectados))
+        guardar_puerto_default(puerto)
+        seleccionar_puerto("", puerto)
+    else:
+        text_output.insert(tk.END, "No se encontraron placas. Ambas listas están habilitadas.\n")
 
 
 def escanear_puertos():
@@ -181,48 +264,29 @@ def escanear_puertos():
     def tarea():
         try:
             _actualizar_progreso(5)
-            salida = detectar_placas()
+            entradas = detectar_placas()
+            dispositivos = obtener_dispositivos()
             _actualizar_progreso(55)
-            text_output.delete("1.0", tk.END)
-            text_output.insert(tk.END, "Escaneo de puertos completado.\n")
-            for widget in frame_radios.winfo_children():
-                widget.destroy()
-            puertos = []
-            for line in salida.splitlines():
-                line = line.strip()
-                if line and not line.startswith("Port"):
-                    puerto = line.split()[0]
-                    puertos.append((puerto, line))
-                    tk.Radiobutton(
-                        frame_radios,
-                        text=line,
-                        variable=port_var,
-                        value=puerto,
-                        bg="black",
-                        fg="white",
-                        selectcolor="black",
-                        anchor="w",
-                        command=lambda value=line, selected=puerto: seleccionar_puerto(value, selected),
-                    ).pack(anchor="w", fill="x")
-                    _actualizar_progreso(85)
-            if puertos:
-                primer_puerto, primer_linea = puertos[0]
-                if primer_puerto != obtener_puerto_default():
-                    guardar_puerto_default(primer_puerto)
-                port_var.set(primer_puerto)
-                seleccionar_puerto(primer_linea, primer_puerto)
-        finally:
-            text_output.after(0, barCarga.detener)
+        except (OSError, subprocess.CalledProcessError, ValueError) as error:
+            def mostrar_error(mensaje=str(error)):
+                _actualizar_puertos([], [])
+                text_output.insert(tk.END, f"No se pudieron consultar los puertos: {mensaje}\n")
+                barCarga.detener()
+            text_output.after(0, mostrar_error)
+        else:
+            text_output.after(
+                0, lambda: _finalizar(lambda: _actualizar_puertos(entradas, dispositivos))
+            )
 
     threading.Thread(target=tarea, daemon=True).start()
 
 
-def _cargar(fqbn, sketch_path):
+def _cargar(fqbn, sketch_path, puerto):
     asegurar_core_instalado(fqbn)
     _actualizar_progreso(15)
     arduino.compile(fqbn, sketch_path)
     _actualizar_progreso(72)
-    arduino.upload(port_var.get(), fqbn, sketch_path)
+    arduino.upload(puerto, fqbn, sketch_path)
     _actualizar_progreso(95)
 
 
@@ -324,7 +388,7 @@ def _confirmar_reemplazo_firmware():
         text=(
             'Al dar clic en Aceptar el firmware cargado actualmente será eliminado '
             'y reemplazado por el Sketch de "Arduino Hound". Asegurese de tener '
-            'un respaldo del Sketch de Arduino actual. ¿Desea continuar?'
+            'un respaldo del Sketch actual de la placa. ¿Desea continuar?'
         ),
         fg="white",
         bg="black",
@@ -376,9 +440,11 @@ def _confirmar_reemplazo_firmware():
 
 
 def cargar_sketch():
+    fqbn = fqbn_var.get().strip()
+    puerto = port_var.get().strip()
     if not _confirmar_reemplazo_firmware():
         return
-    if not fqbn_var.get() or not port_var.get():
+    if not fqbn or not puerto:
         messagebox.showerror(titulo("Error"), "Selecciona FQBN y puerto.", parent=text_output.winfo_toplevel())
         return
     if not SKETCH_PATH.exists():
@@ -388,8 +454,6 @@ def cargar_sketch():
             parent=text_output.winfo_toplevel(),
         )
         return
-    fqbn = fqbn_var.get()
-
     def preguntar_automatico():
         if not messagebox.askyesno(titulo("Modo automático"), "No se pudo cargar usando configuración del JSON.\n\n¿Deseas intentar detección automática de placa?", parent=text_output.winfo_toplevel()):
             return
@@ -399,18 +463,18 @@ def cargar_sketch():
         barCarga.iniciar()
 
         def tarea():
-            _actualizar_progreso(10)
-            fqbn_auto = detectar_fqbn_automatico()
-            _actualizar_progreso(25)
-            if not fqbn_auto:
-                text_output.after(0, lambda: _finalizar(lambda: messagebox.showerror(titulo("Error"), "No se pudo detectar el FQBN automáticamente.", parent=text_output.winfo_toplevel())))
-                return
             try:
-                text_output.insert(tk.END, f"Intentando automático: {fqbn_auto}\n")
-                _cargar(fqbn_auto, SKETCH_PATH)
+                _actualizar_progreso(10)
+                fqbn_auto = arduino.detect_fqbn(puerto)
+                _actualizar_progreso(25)
+                if not fqbn_auto:
+                    raise ValueError("No se pudo detectar un FQBN único automáticamente.")
+                text_output.after(0, lambda: text_output.insert(tk.END, f"Intentando automático: {fqbn_auto}\n"))
+                _cargar(fqbn_auto, SKETCH_PATH, puerto)
                 text_output.after(0, lambda: _finalizar(lambda: messagebox.showinfo(titulo("Éxito"), f"Cargado automáticamente con:\n{fqbn_auto}", parent=text_output.winfo_toplevel())))
-            except subprocess.CalledProcessError:
-                text_output.after(0, lambda: _finalizar(lambda: messagebox.showerror(titulo("Error"), "Falló también el método automático", parent=text_output.winfo_toplevel())))
+            except (OSError, ValueError, subprocess.CalledProcessError) as error:
+                mensaje = f"Falló el método automático: {error}"
+                text_output.after(0, lambda: _finalizar(lambda: messagebox.showerror(titulo("Error"), mensaje, parent=text_output.winfo_toplevel())))
 
         threading.Thread(target=tarea, daemon=True).start()
 
@@ -419,12 +483,13 @@ def cargar_sketch():
 
         def tarea():
             try:
-                text_output.insert(tk.END, f"\nIntento con JSON: {fqbn}\n")
+                text_output.after(0, lambda: text_output.insert(tk.END, f"\nIntento con JSON: {fqbn}\n"))
                 _actualizar_progreso(10)
-                _cargar(fqbn, SKETCH_PATH)
+                _cargar(fqbn, SKETCH_PATH, puerto)
                 text_output.after(0, lambda: _finalizar(lambda: messagebox.showinfo(titulo("Éxito"), "Sketch cargado correctamente", parent=text_output.winfo_toplevel())))
-            except subprocess.CalledProcessError:
-                text_output.insert(tk.END, "Falló método JSON\n")
+            except (OSError, ValueError, subprocess.CalledProcessError) as error:
+                mensaje = f"Falló método JSON: {error}\n"
+                text_output.after(0, lambda: text_output.insert(tk.END, mensaje))
                 text_output.after(0, lambda: _finalizar(preguntar_automatico))
 
         threading.Thread(target=tarea, daemon=True).start()
@@ -435,7 +500,7 @@ def cargar_sketch():
 def cargar_respaldo():
     archivo = filedialog.askopenfilename(
         parent=text_output.winfo_toplevel(),
-        title=titulo("Seleccionar sketch de Arduino"),
+        title=titulo("Seleccionar sketch de Arduino / ESP32"),
         filetypes=(
             ("Sketch de Arduino", "*.ino *.pde *.cpp *.c *.h"),
             ("Todos los archivos", "*.*"),
@@ -447,28 +512,31 @@ def cargar_respaldo():
         messagebox.showerror(titulo("Error"), "Selecciona puerto y placa.", parent=text_output.winfo_toplevel())
         return
 
-    nombre_placa = placa_var.get().strip() or fqbn_var.get().strip()
+    fqbn = fqbn_var.get().strip()
+    puerto = port_var.get().strip()
+    nombre_placa = placa_var.get().strip() or esp32_var.get().strip() or fqbn
     nombre_archivo = Path(archivo).name
     if not _mostrar_confirmacion_sketch(nombre_archivo, nombre_placa):
         return
-
-    fqbn = fqbn_var.get().strip()
 
     def tarea():
         carpeta_temporal = None
         try:
             _actualizar_progreso(5)
             carpeta_temporal = tempfile.mkdtemp(prefix="ArduinoHoundSketch_")
-            ruta_temporal = Path(carpeta_temporal) / Path(archivo).name
+            ruta_sketch = Path(carpeta_temporal) / Path(archivo).stem
+            ruta_sketch.mkdir()
+            ruta_temporal = ruta_sketch / Path(archivo).name
             shutil.copy2(archivo, ruta_temporal)
             _actualizar_progreso(10)
             text_output.after(0, lambda: text_output.insert(tk.END, f"Cargando: {nombre_archivo}\n"))
-            _cargar(fqbn, ruta_temporal.parent)
+            _cargar(fqbn, ruta_sketch, puerto)
             text_output.after(0, lambda: _finalizar(lambda: messagebox.showinfo(titulo("Éxito"), f"Sketch cargado correctamente en:\n{nombre_placa}", parent=text_output.winfo_toplevel())))
-        except (OSError, subprocess.CalledProcessError):
+        except (OSError, ValueError, subprocess.CalledProcessError) as error:
+            mensaje = f"No se pudo cargar el sketch. Verifica la placa, el puerto y la conexión.\n\n{error}"
             text_output.after(0, lambda: _finalizar(lambda: messagebox.showerror(
                 titulo("Error"),
-                "No se pudo cargar el sketch. Verifica la placa, el puerto y la conexión.",
+                mensaje,
                 parent=text_output.winfo_toplevel(),
             )))
         finally:
@@ -481,10 +549,11 @@ def cargar_respaldo():
 
 def crear_panel(root):
     global fqbn_var, port_var, placa_var, frame_radios, board_combo
-    global detalles_output, text_output, barCarga
+    global detalles_output, text_output, barCarga, esp32_var, esp32_combo
     fqbn_var = tk.StringVar()
     port_var = tk.StringVar()
     placa_var = tk.StringVar()
+    esp32_var = tk.StringVar()
 
     outer = tk.Frame(root, bg="black", highlightbackground="white", highlightthickness=1)
     outer.pack(padx=5, pady=5, fill="both", expand=True)
@@ -494,7 +563,7 @@ def crear_panel(root):
     barCarga = BarCarga(main, bg="black")
     barCarga.pack(side="bottom", fill="x", padx=5, pady=5)
 
-    tk.Label(main, text="Cargar Sketch en Arduino", fg=COLOR_TITULO, bg="black", font=("Arial", 14, "bold")).pack(pady=10)
+    tk.Label(main, text="Cargar Sketch en Arduino / ESP32", fg=COLOR_TITULO, bg="black", font=("Arial", 14, "bold")).pack(pady=10)
 
     buttons = tk.Frame(main, bg="black")
     buttons.pack()
@@ -524,6 +593,8 @@ def crear_panel(root):
 
     list_frame = tk.Frame(main, bg="black")
     list_frame.pack(fill="x", pady=5)
+    list_frame.columnconfigure(0, weight=1, uniform="placas")
+    list_frame.columnconfigure(1, weight=1, uniform="placas")
     estilo_combo = ttk.Style(main)
     estilo_combo.configure(
         "Placas.TCombobox",
@@ -537,9 +608,9 @@ def crear_panel(root):
     )
     estilo_combo.map(
         "Placas.TCombobox",
-        fieldbackground=[("readonly", "black")],
+        fieldbackground=[("disabled", "#1b1b1b"), ("readonly", "black")],
         background=[("readonly", "black")],
-        foreground=[("readonly", "yellow1")],
+        foreground=[("disabled", "gray50"), ("readonly", "yellow1")],
         selectbackground=[("readonly", "black")],
         selectforeground=[("readonly", "yellow1")],
     )
@@ -547,10 +618,22 @@ def crear_panel(root):
     main.option_add("*TCombobox*Listbox.foreground", "yellow1")
     main.option_add("*TCombobox*Listbox.selectBackground", "#333333")
     main.option_add("*TCombobox*Listbox.selectForeground", "yellow1")
-    board_combo = ttk.Combobox(list_frame, textvariable=placa_var, state="readonly", width=26, style="Placas.TCombobox")
-    board_combo.pack()
+    tk.Label(list_frame, text="Arduino", fg="cyan", bg="black").grid(
+        row=0, column=0, sticky="w", padx=5,
+    )
+    tk.Label(list_frame, text="ESP32", fg="DarkOrange1", bg="black").grid(
+        row=0, column=1, sticky="w", padx=5,
+    )
+    board_combo = ttk.Combobox(list_frame, textvariable=placa_var, state="readonly", width=16, style="Placas.TCombobox")
+    board_combo.grid(row=1, column=0, sticky="ew", padx=5)
     board_combo["values"] = sorted(arduino_boards)
     board_combo.bind("<<ComboboxSelected>>", on_placa_seleccionada)
+    esp32_combo = ttk.Combobox(
+        list_frame, textvariable=esp32_var, state="readonly", width=16,
+        style="Placas.TCombobox", values=sorted(esp32_boards),
+    )
+    esp32_combo.grid(row=1, column=1, sticky="ew", padx=5)
+    esp32_combo.bind("<<ComboboxSelected>>", on_esp32_seleccionada)
 
     detalles_output = tk.Text(main, height=DETAILS_HEIGHT, bg="black", fg=COLOR_TITULO)
     detalles_output.pack()

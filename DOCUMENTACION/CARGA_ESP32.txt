@@ -1,0 +1,58 @@
+Carga de sketches en Arduino Hound V3
+
+El panel Cargar Sketch contiene dos listas: Arduino (cyan) y ESP32
+(DarkOrange1). El detalle de la placa muestra el FQBN que se usara.
+
+Al escanear o cambiar de puerto se consulta Arduino CLI en formato JSON
+y se complementa con los datos del dispositivo USB. Un FQBN identificado
+tiene prioridad sobre el nombre comercial del dispositivo.
+La familia se determina por la arquitectura del FQBN, no solo por la marca:
+una Arduino Nano ESP32 se trata como ESP32. Si los metadatos de un origen
+estan incompletos, se consultan tambien los de Arduino CLI o del sistema.
+Una respuesta de deteccion invalida se informa en el registro del panel.
+
+- Arduino reconocida: se habilita Arduino y se deshabilita ESP32.
+- ESP32 reconocida: se habilita ESP32 y se deshabilita Arduino.
+- Sin placa o familia identificable: ambas listas quedan habilitadas.
+- Familia conocida pero modelo ambiguo: selecciona el modelo manualmente
+  en la lista habilitada. No se elige un FQBN arbitrario.
+
+CH340, CP210x y FTDI son adaptadores usados por diferentes placas;
+por si solos no permiten distinguir una Arduino de una ESP32.
+Si hay varias placas, selecciona primero el puerto que quieres programar.
+Al cambiar de placa o puerto se elimina la seleccion anterior.
+
+Para ESP32:
+1. Selecciona su puerto. Si el modelo no se detecta, eligelo en la lista ESP32.
+2. Pulsa Cargar sketch. ArduinoHound se compila y carga con el FQBN ESP32.
+3. Cargar respaldo sigue disponible para cargar un .ino propio.
+
+El sketch ArduinoHound incluido compila para Arduino y ESP32. En ESP32 usa
+UART hardware en lugar de SoftwareSerial. Pines UART principales:
+- ESP32 / Wrover / DOIT / NodeMCU-32S / LOLIN32: RX=GPIO26, TX=GPIO27.
+- ESP32-S2 y ESP32-S3: RX=GPIO18, TX=GPIO17.
+- ESP32-C3, C6 y H2: RX=GPIO4, TX=GPIO5.
+El escaneo omite GPIO de flash/PSRAM, arranque, USB nativo, consola e I2C,
+por lo que en ESP32 se prueban menos pines que en Arduino.
+La deteccion de tarjeta SD sigue disponible solo en las placas AVR previstas.
+El respaldo conserva la carga de un archivo individual; no copia librerias
+ni archivos auxiliares. Estos deben estar disponibles en Arduino CLI.
+
+El catalogo ESP32 esta en data/esp32_boards.json, separado del catalogo
+Arduino. Incluye 10 modelos de la plataforma oficial esp32:esp32, compilados
+con Arduino-ESP32 3.3.12. ESP32-C2 no se incluye: el paquete oficial probado
+no contiene sus bibliotecas de arranque y requiere una preparacion adicional.
+Se distribuye con data/ tanto en ejecucion desde el codigo fuente como
+en el paquete de PyInstaller.
+
+Si falta el core esp32:esp32, Arduino CLI actualiza el indice y lo instala
+antes de compilar usando el indice oficial:
+https://espressif.github.io/arduino-esp32/package_esp32_index.json
+La primera instalacion requiere Internet y puede tardar varios minutos.
+No se instala este core al iniciar la aplicacion ni se modifica la
+configuracion de URLs del usuario. Las siguientes cargas reutilizan el core.
+Las librerias adicionales que requiera un sketch se instalan aparte.
+
+Si la placa no entra automaticamente en modo de carga, sigue las
+instrucciones BOOT/RESET de su fabricante. La identificacion USB y las
+pruebas de software no sustituyen la comprobacion con hardware real.

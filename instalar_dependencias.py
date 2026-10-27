@@ -24,6 +24,7 @@ REQUIRED_RUNTIME_FILES = (
     PROJECT_ROOT / "arduino-cli.exe",
     PROJECT_ROOT / "ArduinoHound" / "ArduinoHound.ino",
     PROJECT_ROOT / "data" / "boards.sql",
+    PROJECT_ROOT / "data" / "esp32_boards.json",
     PROJECT_ROOT / "data" / "placas.json",
 )
 

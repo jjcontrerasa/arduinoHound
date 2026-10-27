@@ -10,6 +10,7 @@ from .rutas import resource_path, user_data_path
 
 BOARDS_SQL_FILE = resource_path("data", "boards.sql")
 BOARDS_JSON_FILE = user_data_path("boards.json")
+ESP32_BOARDS_FILE = resource_path("data", "esp32_boards.json")
 BOARDS_SQL_CACHE = user_data_path("boards.sql")
 BOARDS_SQL_HASH = user_data_path("boards.sql.sha256")
 BOARDS_SQL_URL = (
@@ -158,6 +159,21 @@ def cargar_boards():
         _CATALOGO_SINCRONIZADO = True
     _crear_json_desde_respaldo()
     return cargar_json(BOARDS_JSON_FILE, {})
+
+
+def cargar_boards_esp32():
+    with ESP32_BOARDS_FILE.open("r", encoding="utf-8") as file:
+        boards = json.load(file)
+    if not isinstance(boards, dict) or not boards:
+        raise ValueError("El catalogo de placas ESP32 esta vacio o no es valido.")
+    for key, board in boards.items():
+        if (
+            not isinstance(board, dict)
+            or not all(isinstance(board.get(field), str) for field in ("name", "mcu", "fqbn"))
+            or not board["fqbn"].startswith("esp32:esp32:")
+        ):
+            raise ValueError(f"Entrada ESP32 invalida: {key}")
+    return boards
 
 
 def cargar_placas():
