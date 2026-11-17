@@ -39,7 +39,7 @@ El respaldo conserva la carga de un archivo individual; no copia librerias
 ni archivos auxiliares. Estos deben estar disponibles en Arduino CLI.
 
 El catalogo ESP32 esta en data/esp32_boards.json, separado del catalogo
-Arduino. Incluye 10 modelos de la plataforma oficial esp32:esp32, compilados
+Arduino. Incluye 11 modelos de la plataforma oficial esp32:esp32, compilados
 con Arduino-ESP32 3.3.12. ESP32-C2 no se incluye: el paquete oficial probado
 no contiene sus bibliotecas de arranque y requiere una preparacion adicional.
 Se distribuye con data/ tanto en ejecucion desde el codigo fuente como
@@ -52,6 +52,21 @@ La primera instalacion requiere Internet y puede tardar varios minutos.
 No se instala este core al iniciar la aplicacion ni se modifica la
 configuracion de URLs del usuario. Las siguientes cargas reutilizan el core.
 Las librerias adicionales que requiera un sketch se instalan aparte.
+
+Arduino CLI respeta los directorios del archivo arduino-cli.yaml. Si este
+archivo no define directorios, se usan los predeterminados de Arduino CLI,
+sin sustituirlos por la carpeta de la aplicacion. Al crear una configuracion
+nueva, la aplicacion define sus propios directorios de datos y descargas.
+Los errores de preparacion, compilacion y carga muestran la salida real
+de Arduino CLI en el panel y en el aviso; no se atribuyen todos al JSON.
+
+Arduino Nano ESP32 figura como arduino_nano_esp32 en el catalogo. Si Arduino
+CLI reporta arduino:esp32:nano_nora y esp32:esp32:nano_nora para el mismo
+puerto, tanto la seleccion como el reintento automatico usan la entrada
+esp32:esp32:nano_nora del catalogo. No se resuelve asi una lista de modelos
+distintos ni de configuraciones de FQBN distintas.
+Si falla la carga DFU de la Nano ESP32, cerrar los monitores seriales,
+pulsar RESET dos veces y volver a escanear para seleccionar su puerto.
 
 Si la placa no entra automaticamente en modo de carga, sigue las
 instrucciones BOOT/RESET de su fabricante. La identificacion USB y las

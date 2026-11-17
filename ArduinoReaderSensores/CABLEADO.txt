@@ -1,0 +1,68 @@
+ArduinoReaderSensores - Arduino Nano Every (ATmega4809) y Arduino Nano ESP32 (ESP32-S3)
+
+Ambas placas usan los mismos pines Arduino: I2C A4/A5, GPS TX -> D0,
+HC-12 TX -> D8. El sketch elige la implementacion segun la placa al compilar.
+
+Este sketch reemplaza el programa anterior. Monitor USB: 115200 baudios, 8N1.
+Las conexiones siguientes son SUPUESTAS, no detectadas. Verificarlas con la
+placa desconectada antes de recablear. Todos los modulos requieren GND comun.
+
+ADXL345 por I2C:
+  SDA -> A4/SDA; SCL -> A5/SCL.
+  CS -> nivel alto de 3.3 V para I2C; SDO -> GND (0x53) o 3.3 V (0x1D).
+  Se comprueba DEVID=0xE5 antes de configurar o mostrar aceleracion.
+  El chip ADXL345 es de 3.3 V: NO conectar senales de 5 V directamente.
+  Usar adaptador de niveles I2C hacia el Nano Every de 5 V.
+  Alimentacion segun el breakout: no asumir que incorpora regulador/adaptadores.
+
+GPS NEO-6M V2:
+  TX del GPS -> D0/RX del Nano Every; RX del GPS sin conectar.
+  Serial1 a 9600 baudios. Se muestran las sentencias NMEA sin interpretarlas.
+  Datos NMEA sin fix son normales en interiores; la posicion necesita antena
+  y visibilidad del cielo. No se inventan coordenadas.
+  Verificar alimentacion admitida por el breakout, no por el nombre comercial.
+
+HC-12:
+  TX del HC-12 -> D8 del Nano Every; RX del HC-12 sin conectar.
+  D9 es el TX reservado de SoftwareSerial: dejar SIN conectar.
+  SET en modo normal (alto segun las especificaciones del modulo).
+  Serial a 9600 baudios; no se cambia la configuracion ni se transmite.
+  Solo mostrara datos si existe un emisor compatible en el mismo canal/modo.
+  Fuente adecuada al modulo y antena apropiada; verificar sus niveles logicos.
+
+No conectar D1 o D9 al RX de modulos de 3.3 V sin adaptacion de nivel.
+No se necesita ninguna conexion desde Nano TX hacia los modulos para esta prueba.
+No conectar dos salidas TX entre si.
+
+Salida:
+  [ADXL345] raw X/Y/Z y aceleracion aproximada en g (3.9 mg/LSB, sin calibrar).
+  [GPS NMEA] sentencias recibidas a 9600; se avisa si exceden el buffer.
+  [HC12 RX HEX] bytes en hexadecimal y texto original.
+  [ESTADO] actividad cada 5 segundos, incluso si no llega ningun dato serial.
+
+Limites:
+  Nano Every/ATmega4809: acceso TWI0 con timeout de 25 ms por operacion,
+  porque Wire de megaavr 1.8.8 no proporciona timeout.
+  Nano Every: SoftwareSerial bloquea interrupciones durante parte de cada byte;
+  con trafico simultaneo sostenido puede perder datos de GPS/HC-12.
+  Nano ESP32: Wire con timeout de 25 ms y UART por hardware (Serial1 en D0,
+  Serial2 en D8); no usa SoftwareSerial.
+  Esta prueba diagnostica no garantiza captura sin perdida a carga maxima.
+  Cambiar GPS_BAUD, HC12_BAUD o los pines si el cableado/configuracion difieren.
+  La ausencia de bytes seriales no permite identificar por si sola un modulo.
+
+Compilar:
+  arduino-cli compile --fqbn arduino:megaavr:nona4809 ArduinoReaderSensores
+Cargar:
+  arduino-cli upload -p COM4 --fqbn arduino:megaavr:nona4809 ArduinoReaderSensores
+
+Arduino Nano ESP32 (logica de 3.3 V):
+  Sus pines NO toleran 5 V. GPS y HC-12 deben entregar TX a 3.3 V o usar
+  adaptador/divisor de nivel. El ADXL345 se conecta directo a 3.3 V.
+  Al abrir el monitor la placa no se reinicia: los mensajes iniciales pueden no
+  verse, pero [ESTADO] se repite cada 5 segundos.
+  Si la carga falla, pulsar dos veces RESET (LED verde parpadeando) y reintentar.
+Compilar:
+  arduino-cli compile --fqbn esp32:esp32:nano_nora ArduinoReaderSensores
+Cargar (DFU por USB):
+  arduino-cli upload -p COM7 --fqbn esp32:esp32:nano_nora ArduinoReaderSensores

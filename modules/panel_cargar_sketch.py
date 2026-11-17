@@ -276,12 +276,28 @@ def escanear_puertos():
 
 
 def _cargar(fqbn, sketch_path, puerto):
+    text_output.after(0, lambda: text_output.insert(
+        tk.END, "Preparando core (la primera instalación puede tardar varios minutos)...\n",
+    ))
     asegurar_core_instalado(fqbn)
     _actualizar_progreso(15)
+    text_output.after(0, lambda: text_output.insert(tk.END, "Compilando sketch...\n"))
     arduino.compile(fqbn, sketch_path)
     _actualizar_progreso(72)
+    text_output.after(0, lambda: text_output.insert(tk.END, f"Cargando en {puerto}...\n"))
     arduino.upload(puerto, fqbn, sketch_path)
     _actualizar_progreso(95)
+
+
+def _detalle_error(error):
+    if isinstance(error, subprocess.CalledProcessError):
+        detalles = "\n".join(
+            salida.strip() for salida in (error.stdout, error.stderr)
+            if isinstance(salida, str) and salida.strip()
+        )
+        if detalles:
+            return f"{error}\n\n{detalles}"
+    return str(error)
 
 
 def _mostrar_confirmacion_sketch(nombre_archivo, nombre_placa):
@@ -324,8 +340,12 @@ def cargar_sketch():
             parent=text_output.winfo_toplevel(),
         )
         return
-    def preguntar_automatico():
-        if not messagebox.askyesno(titulo("Modo automático"), "No se pudo cargar usando configuración del JSON.\n\n¿Deseas intentar detección automática de placa?", parent=text_output.winfo_toplevel()):
+    def preguntar_automatico(mensaje):
+        if not messagebox.askyesno(
+            titulo("Modo automático"),
+            f"{mensaje}\n\n¿Deseas intentar detección automática de placa?",
+            parent=text_output.winfo_toplevel(),
+        ):
             return
         intentar_auto()
 
@@ -343,28 +363,28 @@ def cargar_sketch():
                 _cargar(fqbn_auto, SKETCH_PATH, puerto)
                 text_output.after(0, lambda: _finalizar(lambda: messagebox.showinfo(titulo("Éxito"), f"Cargado automáticamente con:\n{fqbn_auto}", parent=text_output.winfo_toplevel())))
             except (OSError, ValueError, subprocess.CalledProcessError) as error:
-                mensaje = f"Falló el método automático: {error}"
+                mensaje = f"Falló el método automático: {_detalle_error(error)}"
                 text_output.after(0, lambda: _finalizar(lambda: messagebox.showerror(titulo("Error"), mensaje, parent=text_output.winfo_toplevel())))
 
         threading.Thread(target=tarea, daemon=True).start()
 
-    def intentar_json():
+    def intentar_seleccion():
         barCarga.iniciar()
 
         def tarea():
             try:
-                text_output.after(0, lambda: text_output.insert(tk.END, f"\nIntento con JSON: {fqbn}\n"))
+                text_output.after(0, lambda: text_output.insert(tk.END, f"\nIntento con FQBN seleccionado: {fqbn}\n"))
                 _actualizar_progreso(10)
                 _cargar(fqbn, SKETCH_PATH, puerto)
                 text_output.after(0, lambda: _finalizar(lambda: messagebox.showinfo(titulo("Éxito"), "Sketch cargado correctamente", parent=text_output.winfo_toplevel())))
             except (OSError, ValueError, subprocess.CalledProcessError) as error:
-                mensaje = f"Falló método JSON: {error}\n"
-                text_output.after(0, lambda: text_output.insert(tk.END, mensaje))
-                text_output.after(0, lambda: _finalizar(preguntar_automatico))
+                mensaje = f"No se pudo cargar con {fqbn} en {puerto}:\n{_detalle_error(error)}"
+                text_output.after(0, lambda: text_output.insert(tk.END, mensaje + "\n"))
+                text_output.after(0, lambda: _finalizar(lambda: preguntar_automatico(mensaje)))
 
         threading.Thread(target=tarea, daemon=True).start()
 
-    intentar_json()
+    intentar_seleccion()
 
 
 def cargar_respaldo():
@@ -403,7 +423,7 @@ def cargar_respaldo():
             _cargar(fqbn, ruta_sketch, puerto)
             text_output.after(0, lambda: _finalizar(lambda: messagebox.showinfo(titulo("Éxito"), f"Sketch cargado correctamente en:\n{nombre_placa}", parent=text_output.winfo_toplevel())))
         except (OSError, ValueError, subprocess.CalledProcessError) as error:
-            mensaje = f"No se pudo cargar el sketch. Verifica la placa, el puerto y la conexión.\n\n{error}"
+            mensaje = f"No se pudo cargar el sketch. Verifica la placa, el puerto y la conexión.\n\n{_detalle_error(error)}"
             text_output.after(0, lambda: _finalizar(lambda: messagebox.showerror(
                 titulo("Error"),
                 mensaje,

@@ -60,9 +60,20 @@ class IdentificacionTests(unittest.TestCase):
 
     def test_nano_esp32_usa_arquitectura_y_no_marca(self):
         self.assertEqual(familia_fqbn("arduino:esp32:nano_nora"), "esp32")
+        nano = ESP32_BOARDS["arduino_nano_esp32"]
         self.assertEqual(
             self.identificar(entrada(label="Arduino Nano ESP32")),
-            ("esp32", None, None),
+            ("esp32", "arduino_nano_esp32", nano),
+        )
+
+    def test_nano_esp32_con_dos_cores_elige_el_del_catalogo(self):
+        board = entrada(fqbn="arduino:esp32:nano_nora", nombre="Arduino Nano ESP32")
+        board["matching_boards"].append(
+            {"name": "Arduino Nano ESP32", "fqbn": "esp32:esp32:nano_nora"}
+        )
+        self.assertEqual(
+            self.identificar(board),
+            ("esp32", "arduino_nano_esp32", ESP32_BOARDS["arduino_nano_esp32"]),
         )
 
     def test_familia_fqbn_prevalece_sobre_grupo_del_catalogo(self):
@@ -133,6 +144,30 @@ class ArduinoCLITests(unittest.TestCase):
     def setUp(self):
         self.cli = ArduinoCLI()
 
+    def test_config_existente_no_cambia_directorio_de_cores(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            config = Path(carpeta) / "arduino-cli.yaml"
+            contenido = "board_manager:\n  additional_urls: []\n"
+            config.write_text(contenido, encoding="utf-8")
+            self.cli.config_path = config
+            self.assertEqual(
+                self.cli.ensure_config(),
+                [str(self.cli.cli_path), "--config-file", str(config)],
+            )
+            self.assertEqual(config.read_text(encoding="utf-8"), contenido)
+
+    def test_config_nueva_conserva_directorios_de_la_aplicacion(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            self.cli.config_path = Path(carpeta) / "arduino-cli.yaml"
+            self.cli.ensure_config()
+            contenido = self.cli.config_path.read_text(encoding="utf-8")
+            for nombre, ruta in (
+                ("data", self.cli.data_path),
+                ("downloads", self.cli.downloads_path),
+                ("user", self.cli.user_path),
+            ):
+                self.assertIn(f"  {nombre}: {ruta}\n", contenido)
+
     def test_descubrimiento_json_y_errores(self):
         with patch.object(self.cli, "run", return_value=Mock(stdout=json.dumps({
             "detected_ports": [entrada(fqbn="esp32:esp32:esp32")]
@@ -169,6 +204,34 @@ class ArduinoCLITests(unittest.TestCase):
         with patch.object(self.cli, "discover_boards", return_value=[board]):
             self.assertIsNone(self.cli.detect_fqbn("COM9"))
 
+    def test_deteccion_automatica_nano_esp32_con_dos_proveedores(self):
+        board = entrada(fqbn="arduino:esp32:nano_nora")
+        board["matching_boards"].append({"fqbn": "esp32:esp32:nano_nora"})
+        with patch.object(self.cli, "discover_boards", return_value=[board]):
+            self.assertEqual(self.cli.detect_fqbn("COM9"), "esp32:esp32:nano_nora")
+
+    def test_deteccion_nano_esp32_con_opciones_distintas_sigue_ambigua(self):
+        board = entrada(fqbn="esp32:esp32:nano_nora")
+        board["matching_boards"].append(
+            {"fqbn": "arduino:esp32:nano_nora:PinNumbers=byGPIONumber"}
+        )
+        with patch.object(self.cli, "discover_boards", return_value=[board]):
+            self.assertIsNone(self.cli.detect_fqbn("COM9"))
+
+    def test_fallo_cli_conserva_diagnostico_para_el_panel(self):
+        error = subprocess.CalledProcessError(
+            1, ["compile"], output="Compilando...\n",
+            stderr="fatal error: Sensor.h: No such file or directory",
+        )
+        with patch("modules.arduino_cli.subprocess.run", side_effect=error) as run:
+            with self.assertRaises(subprocess.CalledProcessError) as resultado:
+                self.cli.compile("esp32:esp32:nano_nora", Path("sketch"))
+        self.assertEqual(resultado.exception.stderr, error.stderr)
+        self.assertEqual(
+            run.call_args.kwargs,
+            {"capture_output": True, "text": True, "check": True},
+        )
+
     def test_prepara_core_esp32_con_indice_oficial(self):
         with patch.object(self.cli, "run", return_value=Mock(stdout="arduino:avr")) as run:
             self.cli.ensure_core("esp32:esp32:esp32")
@@ -182,6 +245,9 @@ class ArduinoCLITests(unittest.TestCase):
             ("core", "install", "esp32:esp32", "--additional-urls", ESP32_PACKAGE_URL),
         )
         self.assertTrue(all(call.kwargs["check"] for call in run.call_args_list))
+        for call in run.call_args_list[1:]:
+            self.assertTrue(call.kwargs["capture_output"])
+            self.assertTrue(call.kwargs["text"])
 
     def test_reutiliza_core_instalado(self):
         with patch.object(self.cli, "run", return_value=Mock(stdout="esp32:esp32 3.3.2")) as run:
@@ -211,6 +277,10 @@ class ArduinoCLITests(unittest.TestCase):
             run.call_args_list[1].args,
             ("upload", "-p", "COM9", "--fqbn", fqbn, "sketch"),
         )
+        for call in run.call_args_list:
+            self.assertEqual(
+                call.kwargs, {"capture_output": True, "text": True, "check": True},
+            )
 
 
 class PanelTests(unittest.TestCase):
@@ -352,6 +422,27 @@ class PanelTests(unittest.TestCase):
         )
         info.assert_called_once()
 
+    def test_error_de_carga_muestra_causa_real_y_no_culpa_json(self):
+        self.seleccionar("esp32:esp32:nano_nora")
+        diagnostico = "dfu-util: No DFU capable USB device available"
+        fallo = subprocess.CalledProcessError(
+            74, ["upload"], stderr=diagnostico,
+        )
+        with patch.object(panel.threading, "Thread", ImmediateThread), \
+                patch.object(panel, "_confirmar_reemplazo_firmware", return_value=True), \
+                patch.object(panel, "_cargar", side_effect=fallo), \
+                patch.object(panel.messagebox, "askyesno", return_value=False) as preguntar, \
+                patch.object(panel.messagebox, "showinfo") as info:
+            panel.cargar_sketch()
+            self.root.update()
+        registro = panel.text_output.get("1.0", "end")
+        self.assertIn(diagnostico, registro)
+        mensaje = preguntar.call_args.args[1]
+        self.assertIn(diagnostico, mensaje)
+        self.assertNotIn("configuración del JSON", mensaje)
+        info.assert_not_called()
+        self.assertFalse(panel.barCarga._activo)
+
     def test_carga_usa_puerto_capturado_y_no_el_valor_actual_del_widget(self):
         panel.port_var.set("COM10")
         with patch.object(panel.arduino, "ensure_core") as core, \
@@ -409,7 +500,9 @@ class PanelTests(unittest.TestCase):
                     patch.object(panel, "_mostrar_confirmacion_sketch", return_value=True), \
                     patch.object(panel.threading, "Thread", ImmediateThread), \
                     patch.object(panel.arduino, "ensure_core"), \
-                    patch.object(panel.arduino, "compile", side_effect=subprocess.CalledProcessError(1, "compile")), \
+                    patch.object(panel.arduino, "compile", side_effect=subprocess.CalledProcessError(
+                        1, "compile", stderr="fatal error: Sensor.h: No such file or directory",
+                    )), \
                     patch.object(panel.arduino, "upload") as upload, \
                     patch.object(panel.messagebox, "showerror") as error, \
                     patch.object(panel.messagebox, "showinfo") as info:
@@ -419,6 +512,7 @@ class PanelTests(unittest.TestCase):
                 info.assert_not_called()
                 error.assert_called_once()
                 self.assertIn("compile", error.call_args.args[1])
+                self.assertIn("Sensor.h: No such file or directory", error.call_args.args[1])
                 self.assertFalse(panel.barCarga._activo)
 
 

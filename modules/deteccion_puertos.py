@@ -106,6 +106,12 @@ def identificar_placa(entrada, catalogos, dispositivo=None):
             return None, None, None
         if len(candidatos) == 1:
             return next(iter(candidatos.values()))
+        # El mismo modelo puede aparecer en cores de distintos proveedores
+        # (p. ej. arduino:esp32:nano_nora y esp32:esp32:nano_nora).
+        placas = {tuple(fqbn.split(":")[1:]) for fqbn in candidatos}
+        del_catalogo = [value for fqbn, value in candidatos.items() if value[1] != fqbn]
+        if len(placas) == 1 and len(del_catalogo) == 1:
+            return del_catalogo[0]
         return next(iter(familias)), None, None
 
     port = entrada.get("port", {})

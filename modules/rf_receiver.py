@@ -5,6 +5,7 @@ import math
 import queue
 import threading
 import time
+from .acceso_serial import acceso_puerto, reservado_por_reader
 
 try:
     import serial
@@ -124,6 +125,15 @@ class ReceptorRF(threading.Thread):
             self.fin.wait(1)
 
     def observar(self, puerto):
+        bloqueo, reserva_reader = acceso_puerto(puerto)
+        if reserva_reader.is_set() or not bloqueo.acquire(blocking=False):
+            return
+        try:
+            return self._observar(puerto)
+        finally:
+            bloqueo.release()
+
+    def _observar(self, puerto):
         identificado = False
         try:
             with serial.Serial(puerto, 115200, timeout=0.2) as conexion:
@@ -136,7 +146,7 @@ class ReceptorRF(threading.Thread):
                 ultimo_dato = time.monotonic()
                 buffer = b""
                 conexion.write(b"ID\n")
-                while not self.fin.is_set():
+                while not self.fin.is_set() and not reservado_por_reader(puerto):
                     if identificado:
                         try:
                             comando = self.comandos.get_nowait()

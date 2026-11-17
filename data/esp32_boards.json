@@ -48,5 +48,10 @@
         "name": "WEMOS LOLIN32",
         "mcu": "ESP32",
         "fqbn": "esp32:esp32:lolin32"
+    },
+    "arduino_nano_esp32": {
+        "name": "Arduino Nano ESP32",
+        "mcu": "ESP32-S3",
+        "fqbn": "esp32:esp32:nano_nora"
     }
 }

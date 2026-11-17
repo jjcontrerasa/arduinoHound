@@ -32,6 +32,7 @@ import modules.cargarSketch as cargarSketch
 import modules.puertos as puertos
 import modules.rastrear as rastrear
 import modules.rf_hound as rf_hound
+import modules.aReader as aReader
 from modules.rutas import APP_NAME, configurar_ventana, messagebox, titulo
 
 
@@ -40,12 +41,14 @@ BG_COLOR = "black"
 FRAME_BORDER_COLOR = "white"
 COLOR_AZUL = "#3399FF"
 COLOR_RF_VERDE = "green2"
+COLOR_READER = "DarkGoldenrod1"
 TITLE = APP_NAME
 HEADER_HEIGHT = 100
 FOOTER_HEIGHT = 60
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 ICON_PATH = ASSETS_DIR / "IconoAHound.ico"
 ICON_RF_PATH = ASSETS_DIR / "RFHound.png"
+ICON_READER_PATH = ASSETS_DIR / "aReader.png"
 TEXTO_DESARROLLADORES = (
     "Instituto Politécnico Nacional - Escuela Superior de Ingeniería Mecánica y Eléctrica, Unidad Zacatenco\n"
     "Software desarrollado por: Juan José Contreras Arteaga\n"
@@ -86,16 +89,26 @@ tabs_container.pack(side="left")
 pestana_activa = ["arduino"]
 btn_tab_arduino = None
 btn_tab_rf = None
+btn_tab_reader = None
 label_titulo_header = None
 logo_izq_label = None
 logo_arduino_img = None
 logo_rf_img = None
+logo_reader_img = None
 frame_main_content = None
 frame_rf_content = None
+frame_reader_content = None
 
 
 def cambiar_pestana(nombre):
-    """Arduino Hound / FRHound."""
+    """Alterna el contenido y la identidad del encabezado compartido."""
+    if frame_reader_content is not None:
+        frame_reader_content.grid_remove()
+    if btn_tab_reader is not None:
+        btn_tab_reader.config(
+            bg="#111111", fg="gray65", highlightbackground="#333333",
+            activebackground="#33270d", activeforeground=COLOR_READER,
+        )
     if nombre == "arduino":
         pestana_activa[0] = "arduino"
         if frame_rf_content is not None:
@@ -124,6 +137,25 @@ def cambiar_pestana(nombre):
                 highlightbackground="#333333",
                 activebackground="#1e221e",
                 activeforeground=COLOR_RF_VERDE,
+            )
+    elif nombre == "reader":
+        pestana_activa[0] = "reader"
+        for frame in (frame_main_content, frame_rf_content):
+            if frame is not None:
+                frame.grid_remove()
+        if frame_reader_content is not None:
+            frame_reader_content.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
+        if label_titulo_header is not None:
+            label_titulo_header.config(text="Arduino Reader", fg=COLOR_READER)
+        if logo_izq_label is not None and logo_reader_img is not None:
+            logo_izq_label.config(image=logo_reader_img)
+            logo_izq_label.image = logo_reader_img
+        for boton in (btn_tab_arduino, btn_tab_rf):
+            if boton is not None:
+                boton.config(bg="#111111", fg="gray65", highlightbackground="#333333")
+        if btn_tab_reader is not None:
+            btn_tab_reader.config(
+                bg="#302309", fg=COLOR_READER, highlightbackground=COLOR_READER,
             )
     elif nombre == "rf":
         pestana_activa[0] = "rf"
@@ -196,6 +228,25 @@ btn_tab_rf = tk.Button(
 )
 btn_tab_rf.pack(side="left", padx=0)
 
+btn_tab_reader = tk.Button(
+    tabs_container,
+    text="  Arduino Reader  ",
+    font=("Arial", 10, "bold"),
+    bg="#111111",
+    fg="gray65",
+    activebackground="#33270d",
+    activeforeground=COLOR_READER,
+    bd=0,
+    highlightthickness=1,
+    highlightbackground="#333333",
+    relief="flat",
+    cursor="hand2",
+    padx=16,
+    pady=5,
+    command=lambda: cambiar_pestana("reader"),
+)
+btn_tab_reader.pack(side="left", padx=(6, 0))
+
 
 def _on_hover_arduino(_event):
     if pestana_activa[0] != "arduino" and btn_tab_arduino is not None:
@@ -216,11 +267,22 @@ def _on_leave_rf(_event):
     if pestana_activa[0] != "rf" and btn_tab_rf is not None:
         btn_tab_rf.config(bg="#111111", fg="gray65")
 
+def _on_hover_reader(_event):
+    if pestana_activa[0] != "reader":
+        btn_tab_reader.config(bg="#1a1a1a", fg="white")
+
+
+def _on_leave_reader(_event):
+    if pestana_activa[0] != "reader":
+        btn_tab_reader.config(bg="#111111", fg="gray65")
+
 
 btn_tab_arduino.bind("<Enter>", _on_hover_arduino)
 btn_tab_arduino.bind("<Leave>", _on_leave_arduino)
 btn_tab_rf.bind("<Enter>", _on_hover_rf)
 btn_tab_rf.bind("<Leave>", _on_leave_rf)
+btn_tab_reader.bind("<Enter>", _on_hover_reader)
+btn_tab_reader.bind("<Leave>", _on_leave_reader)
 
 # ---------------- ENCABEZADO ----------------
 frame_header = tk.Frame(root, bg=BG_COLOR, height=HEADER_HEIGHT)
@@ -247,6 +309,13 @@ if ImageTk:
             logo_rf_img = ImageTk.PhotoImage(Image.open(ICON_RF_PATH).resize((90, 90)))
         except Exception:
             pass
+
+try:
+    imagen_reader = tk.PhotoImage(file=str(ICON_READER_PATH))
+    escala = max(1, (max(imagen_reader.width(), imagen_reader.height()) + 89) // 90)
+    logo_reader_img = imagen_reader.subsample(escala)
+except tk.TclError as error:
+    messagebox.showerror(titulo("Arduino Reader"), f"No se pudo cargar aReader.png:\n{error}")
 
 imagen_inicial = logo_arduino_img or logo_rf_img
 if imagen_inicial is not None:
@@ -336,6 +405,7 @@ def _actualizar_bbdd():
 
 
 def _salir_aplicacion():
+    aReader.liberar_recursos()
     for liberar in (puertos.liberar_puertos, rastrear.liberar_puertos, rf_hound.liberar_recursos):
         try:
             liberar()
@@ -398,6 +468,15 @@ frame_rf_content.rowconfigure(0, weight=1)
 rf_hound.crear_panel(frame_rf_content)
 frame_rf_content.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
 frame_rf_content.grid_remove()
+
+# ---------------- PESTAÑA 3: CONTENIDO ARDUINO READER ----------------
+frame_reader_content = tk.Frame(root, bg=BG_COLOR)
+frame_reader_content.columnconfigure(0, weight=1)
+frame_reader_content.rowconfigure(0, weight=1)
+
+aReader.crear_panel(frame_reader_content)
+frame_reader_content.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
+frame_reader_content.grid_remove()
 
 # ---------------- PIE DE PÁGINA ----------------
 frame_footer = tk.Frame(root, bg=BG_COLOR, height=FOOTER_HEIGHT)

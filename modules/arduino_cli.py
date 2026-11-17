@@ -1,6 +1,8 @@
 import json
 import subprocess
 
+from .deteccion_puertos import identificar_placa
+from .persistencia import cargar_boards_esp32
 from .rutas import arduino_cli_path, resource_path, user_data_path
 
 
@@ -32,7 +34,6 @@ class ArduinoCLI:
         self.command = [
             str(self.cli_path),
             "--config-file", str(self.config_path),
-            "--config-dir", str(user_data_path()),
         ]
         return self.command
 
@@ -94,14 +95,20 @@ class ArduinoCLI:
                 ["--additional-urls", ESP32_PACKAGE_URL]
                 if platform == "esp32:esp32" else []
             )
-            self.run("core", "update-index", *extra, check=True)
-            self.run("core", "install", platform, *extra, check=True)
+            self.run("core", "update-index", *extra, capture_output=True, text=True, check=True)
+            self.run("core", "install", platform, *extra, capture_output=True, text=True, check=True)
 
     def compile(self, fqbn, sketch_path=SKETCH_PATH):
-        return self.run("compile", "--fqbn", fqbn, str(sketch_path), check=True)
+        return self.run(
+            "compile", "--fqbn", fqbn, str(sketch_path),
+            capture_output=True, text=True, check=True,
+        )
 
     def upload(self, port, fqbn, sketch_path=SKETCH_PATH):
-        return self.run("upload", "-p", port, "--fqbn", fqbn, str(sketch_path), check=True)
+        return self.run(
+            "upload", "-p", port, "--fqbn", fqbn, str(sketch_path),
+            capture_output=True, text=True, check=True,
+        )
 
     def detect_fqbn(self, port):
         for entry in self.discover_boards():
@@ -112,5 +119,12 @@ class ArduinoCLI:
                     if isinstance(board.get("fqbn"), str)
                     and board["fqbn"].count(":") >= 2
                 }
-                return next(iter(fqbns)) if len(fqbns) == 1 else None
+                if len(fqbns) == 1:
+                    return next(iter(fqbns))
+                if len(fqbns) > 1:
+                    _, _, datos = identificar_placa(
+                        entry, {"esp32": cargar_boards_esp32()},
+                    )
+                    return datos["fqbn"] if datos else None
+                return None
         return None
